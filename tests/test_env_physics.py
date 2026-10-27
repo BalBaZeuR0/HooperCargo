@@ -77,11 +77,18 @@ def test_empty_tank_gives_no_thrust(env0, step0):
     assert float(s.pipeline_state.fuel) == 0.0
 
 
-def test_uncontrolled_flight_until_empty_stays_finite(env0, step0):
-    # open loop the hopper tumbles and crashes; numbers must stay finite
-    s = rollout(env0, step0, [1, 0, 0], 25.0)   # 0.6 kg lasts ~19.6 s at 45 N
+def test_tank_runs_dry_without_going_negative(env0, step0):
+    start = jax.jit(env0.reset)(KEY)
+    low = start.replace(pipeline_state=start.pipeline_state.replace(fuel=jnp.array(0.02)))
+    s = rollout(env0, step0, [1, 0, 0], 1.0, low)   # 0.02 kg lasts ~0.65 s at 45 N
     assert float(s.pipeline_state.fuel) == 0.0
     assert jnp.isfinite(s.obs).all()
+
+
+def test_uncontrolled_flight_stays_finite(env0, step0):
+    # open loop the hopper tumbles and crashes; stepping on must stay finite
+    s = rollout(env0, step0, [1, 0, 0], 25.0)
+    assert jnp.isfinite(s.obs).all() and float(s.pipeline_state.fuel) >= 0.0
 
 
 def test_pad_distance_in_stage_range():
