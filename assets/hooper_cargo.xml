@@ -1,0 +1,136 @@
+<!--
+    HooperCargo hopper (scale = 1 template).
+
+    Derived from assets/hopper_default.xml of GulogluHaktan/3DRocketRl
+    (https://github.com/GulogluHaktan/3DRocketRl). Changes:
+      * `payload` and `fuel` weld bodies whose mass / CoM are rewritten every
+        step by hoopercargo.payload.apply_mass_props,
+      * mocap launch / landing pads (visual only),
+      * only foot <-> ground contacts are enabled,
+      * larger ground, MJX-friendly solver profile,
+      * hopper raised by one foot radius so the feet rest exactly on the ground.
+
+    hoopercargo.model.build_model(scale) rescales this file; all numbers here
+    are for scale = 1.
+-->
+<mujoco model="hooper_cargo">
+
+    <compiler angle="degree"/>
+
+    <option gravity="0 0 -9.81"
+            timestep="0.002"
+            integrator="Euler"
+            solver="CG"
+            iterations="8"
+            ls_iterations="4"/>
+
+    <visual>
+        <headlight ambient="0.5 0.5 0.5"/>
+        <global offwidth="1280" offheight="960"/>
+    </visual>
+
+    <asset>
+        <texture type="skybox" builtin="gradient" rgb1="0.2 0.3 0.4" rgb2="0 0 0"
+                 width="512" height="512"/>
+        <texture name="grid" type="2d" builtin="checker" rgb1="0.32 0.32 0.32"
+                 rgb2="0.28 0.28 0.28" width="512" height="512"/>
+        <material name="grid_mat" texture="grid" texrepeat="60 60"/>
+        <material name="body_mat" rgba="0.7 0.7 0.7 1"/>
+        <material name="leg_mat" rgba="0.2 0.2 0.2 1"/>
+        <material name="pad_mat" rgba="0.1 0.8 0.1 1"/>
+        <material name="launch_mat" rgba="0.8 0.5 0.1 1"/>
+        <material name="foot_mat" rgba="0.9 0.9 0.2 1"/>
+        <material name="cargo_mat" rgba="0.2 0.4 0.9 1"/>
+    </asset>
+
+    <worldbody>
+
+        <geom name="ground" type="plane" pos="0 0 0" size="150 150 0.1"
+              material="grid_mat" friction="1.2 0.1 0.1"
+              contype="0" conaffinity="1"
+              solref="0.02 1" solimp="0.9 0.95 0.001"/>
+
+        <body name="launch_pad" mocap="true" pos="0 0 0">
+            <geom name="launch_pad_geom" type="cylinder" pos="0 0 0.005" size="0.5 0.005"
+                  material="launch_mat" contype="0" conaffinity="0"/>
+        </body>
+
+        <body name="landing_pad" mocap="true" pos="0 0 0">
+            <geom name="landing_pad_geom" type="cylinder" pos="0 0 0.005" size="1.5 0.005"
+                  material="pad_mat" contype="0" conaffinity="0"/>
+        </body>
+
+        <!-- body origin = dry CoM; feet (radius 0.025) rest on the ground -->
+        <body name="hopper" pos="0 0 0.38">
+
+            <freejoint/>
+
+            <inertial pos="0 0 0" mass="1.6" diaginertia="0.025 0.025 0.008"/>
+
+            <site name="COM" pos="0 0 0" size="0.02" rgba="1 0 0 1"/>
+
+            <geom name="main_body" type="cylinder" fromto="0 0 -0.150  0 0 0.445" size="0.06"
+                  material="body_mat" rgba="0.8 0.8 0.8 0.7" contype="0" conaffinity="0"/>
+
+            <!-- cargo bay contents: mass / CoM set at runtime -->
+            <body name="payload" pos="0 0 0">
+                <inertial pos="0 0 0.175" mass="0.0001" diaginertia="1e-8 1e-8 1e-8"/>
+                <geom name="payload_geom" type="box" pos="0 0 0.175" size="0.04 0.04 0.04"
+                      material="cargo_mat" contype="0" conaffinity="0"/>
+            </body>
+
+            <body name="fuel" pos="0 0 0">
+                <inertial pos="0 0 -0.07" mass="0.0001" diaginertia="1e-8 1e-8 1e-8"/>
+            </body>
+
+            <geom name="leg1" type="capsule" fromto="0 0 -0.005   0.4 0 -0.355" size="0.012"
+                  material="leg_mat" contype="0" conaffinity="0"/>
+            <geom name="foot1_geom" type="sphere" pos="0.4 0 -0.355" size="0.025"
+                  material="foot_mat" contype="1" conaffinity="0"
+                  solref="0.02 1" solimp="0.9 0.95 0.001"/>
+
+            <geom name="leg2" type="capsule" fromto="0 0 -0.005  -0.4 0 -0.355" size="0.012"
+                  material="leg_mat" contype="0" conaffinity="0"/>
+            <geom name="foot2_geom" type="sphere" pos="-0.4 0 -0.355" size="0.025"
+                  material="foot_mat" contype="1" conaffinity="0"
+                  solref="0.02 1" solimp="0.9 0.95 0.001"/>
+
+            <geom name="leg3" type="capsule" fromto="0 0 -0.005   0 0.4 -0.355" size="0.012"
+                  material="leg_mat" contype="0" conaffinity="0"/>
+            <geom name="foot3_geom" type="sphere" pos="0 0.4 -0.355" size="0.025"
+                  material="foot_mat" contype="1" conaffinity="0"
+                  solref="0.02 1" solimp="0.9 0.95 0.001"/>
+
+            <geom name="leg4" type="capsule" fromto="0 0 -0.005   0 -0.4 -0.355" size="0.012"
+                  material="leg_mat" contype="0" conaffinity="0"/>
+            <geom name="foot4_geom" type="sphere" pos="0 -0.4 -0.355" size="0.025"
+                  material="foot_mat" contype="1" conaffinity="0"
+                  solref="0.02 1" solimp="0.9 0.95 0.001"/>
+
+            <!-- TVC gimbal: pivot 0.15 m below the dry CoM -->
+            <body name="tvc_yaw" pos="0 0 -0.150">
+                <inertial pos="0 0 0" mass="0.01" diaginertia="0.001 0.001 0.001"/>
+                <joint name="tvc_yaw_joint" type="hinge" axis="1 0 0" range="-25 25"
+                       damping="0.1" armature="0.002" frictionloss="0.005"/>
+                <body name="tvc_pitch">
+                    <inertial pos="0 0 0" mass="0.02" diaginertia="0.0002 0.0002 0.0002"/>
+                    <joint name="tvc_pitch_joint" type="hinge" axis="0 1 0" range="-25 25"
+                           damping="0.1" armature="0.002" frictionloss="0.005"/>
+                    <geom name="engine" type="cylinder" pos="0 0 -0.025" size="0.04 0.02"
+                          rgba="0.8 0.2 0.2 1" contype="0" conaffinity="0"/>
+                    <site name="thrust_site" pos="0 0 -0.10" size="0.02" rgba="1 0.5 0 1"/>
+                </body>
+            </body>
+
+        </body>
+
+    </worldbody>
+
+    <actuator>
+        <position name="tvc_yaw" joint="tvc_yaw_joint" kp="10" ctrlrange="-25 25"
+                  forcerange="-2.5 2.5"/>
+        <position name="tvc_pitch" joint="tvc_pitch_joint" kp="10" ctrlrange="-25 25"
+                  forcerange="-2.5 2.5"/>
+    </actuator>
+
+</mujoco>

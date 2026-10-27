@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hoopercargo"
+version = "0.1.0"
+description = "MJX cargo hopper: PPO-trained point-to-point flight and upright landing under random payload, fuel burn and wind"
+requires-python = ">=3.11"
+dependencies = [
+    "jax==0.7.2",
+    "mujoco==3.8.0",
+    "mujoco-mjx==3.8.0",
+    "brax==0.14.2",
+    "flax==0.11.2",
+    "optax==0.2.6",
+    "orbax-checkpoint==0.11.28",
+    "matplotlib==3.11.0",
+    "imageio[ffmpeg]==2.37.3",
+    "rlpanel @ git+https://github.com/BalBaZeuR0/RLpanel@v0.1.0",
+]
+
+[project.optional-dependencies]
+gpu = ["jax[cuda13]==0.7.2"]
+dev = ["pytest==9.0.2"]
+
+[tool.setuptools]
+packages = ["hoopercargo"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
