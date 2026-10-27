@@ -44,6 +44,7 @@ class HopperParams:
     # aerodynamics
     drag_area: float = 0.072          # m^2
     drag_cd: float = 1.0
+    cp_z: float = 0.15                # centre of pressure: hull centre (z -0.15 ... 0.445)
     ang_damping: float = 0.34         # N m s / rad (Haktan's value)
     # landing criteria
     touchdown_vz_max: float = 2.0     # m/s
@@ -93,6 +94,7 @@ class HopperParams:
             airborne_height=b.airborne_height * L,
             contact_tol=b.contact_tol * L,
             drag_area=b.drag_area * L**2,
+            cp_z=b.cp_z * L,
             ang_damping=b.ang_damping * L**4.5,
             touchdown_vz_max=b.touchdown_vz_max * s,
             touchdown_vxy_max=b.touchdown_vxy_max * s,

@@ -1,0 +1,20 @@
+{
+  "lang": "en",
+  "nodes": {
+    "sample": {"label": "Random task\n(pad, payload, wind)", "pos": [0, 0], "kind": "data"},
+    "mass":   {"label": "Mass props\n(payload + fuel CoM)", "pos": [2.6, 0], "kind": "process"},
+    "mjx":    {"label": "MuJoCo MJX\nphysics + contacts", "pos": [5.2, 0], "kind": "external"},
+    "land":   {"label": "Landing check\n(upright, on pad)", "pos": [7.8, 0], "kind": "decision"},
+    "forces": {"label": "Thrust, TVC,\ndrag, fuel burn", "pos": [5.2, 1.6], "kind": "process"},
+    "ppo":    {"label": "PPO policy\n(Brax)", "pos": [5.2, 3.3], "kind": "model"},
+    "panel":  {"label": "rlpanel\nlive dashboard", "pos": [2.6, 3.3], "kind": "output"},
+    "eval":   {"label": "1000-flight eval\nCSV + plots", "pos": [7.8, 3.3], "kind": "output"}
+  },
+  "edges": [
+    ["sample", "mass"], ["mass", "mjx"], ["mjx", "land"], ["forces", "mjx"],
+    {"from": "land", "to": "ppo", "label": "obs + reward", "rad": -0.25},
+    {"from": "ppo", "to": "forces", "label": "throttle, gimbal"},
+    ["ppo", "panel"], ["ppo", "eval"]
+  ],
+  "groups": [{"label": "HooperCargoEnv (pure JAX)", "nodes": ["mass", "mjx", "forces", "land"], "label_at": "top-right"}]
+}

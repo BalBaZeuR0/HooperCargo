@@ -19,15 +19,18 @@ import mujoco  # noqa: E402
 import numpy as np  # noqa: E402
 
 from hoopercargo.env import HooperCargoEnv  # noqa: E402
-from hoopercargo.evaluate import load_policy  # noqa: E402
+from hoopercargo.evaluate import load_policy, make_eval_env  # noqa: E402
 from make_plots import INK_2, SERIES  # noqa: E402
 
 FRAME_EVERY = 3   # control steps per GIF frame (0.06 s)
 
 
-def fly(params, seed: int, stage: int, scale: float, max_seconds: float | None = None):
-    """One deterministic episode; returns the env and per-step pipeline states (host numpy)."""
-    env = HooperCargoEnv(stage=stage, scale=scale)
+def fly(params, seed: int, stage: int, scale: float | None = None,
+        max_seconds: float | None = None):
+    """One deterministic episode; returns the env and the per-step states.
+
+    The env follows the run's config.json (scale, payload observation)."""
+    env = make_eval_env(params, stage, scale)
     policy = jax.jit(load_policy(params))
     step = jax.jit(env.step)
     state = jax.jit(env.reset)(jax.random.PRNGKey(seed))
@@ -41,14 +44,14 @@ def fly(params, seed: int, stage: int, scale: float, max_seconds: float | None =
     return env, trace
 
 
-def render_flight(params, seed: int, out_gif, stage: int = 2, scale: float = 1.0,
+def render_flight(params, seed: int, out_gif, stage: int = 2, scale: float | None = None,
                   max_seconds: float | None = None, width: int = 400, height: int = 300) -> Path:
     env, trace = fly(params, seed, stage, scale, max_seconds)
     m = env.host_model
     d = mujoco.MjData(m)
     payload_geom = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, "payload_geom")
     cam = mujoco.MjvCamera()
-    cam.distance = 6.0 * scale
+    cam.distance = 6.0 * env.params.scale
     cam.elevation = -15.0
     cam.azimuth = 135.0
     frames = []
@@ -68,7 +71,30 @@ def render_flight(params, seed: int, out_gif, stage: int = 2, scale: float = 1.0
     return out_gif
 
 
-def plot_trajectories(params, n: int, seed: int, out_png, stage: int = 2, scale: float = 1.0,
+def render_still(out_png, pad_distance: float = 4.5, scale: float = 1.0,
+                 width: int = 960, height: int = 540) -> Path:
+    """Single frame of the loaded hopper on its launch pad, landing pad in the background."""
+    env = HooperCargoEnv(stage=0, scale=scale)
+    m = env.host_model
+    d = mujoco.MjData(m)
+    m.body_pos[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "landing_pad")] = [pad_distance * scale, 0, 0]
+    d.mocap_pos[env.ids.landing_pad_mocap] = [pad_distance * scale, 0, 0]
+    mujoco.mj_forward(m, d)
+    cam = mujoco.MjvCamera()
+    cam.lookat[:] = [0.6 * pad_distance * scale, 0, 0.4 * scale]
+    cam.distance = 1.4 * pad_distance * scale
+    cam.elevation = -14.0
+    cam.azimuth = 90.0
+    with mujoco.Renderer(m, height=height, width=width) as renderer:
+        renderer.update_scene(d, camera=cam)
+        img = renderer.render()
+    out_png = Path(out_png)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    iio.imwrite(out_png, img)
+    return out_png
+
+
+def plot_trajectories(params, n: int, seed: int, out_png, stage: int = 2, scale: float | None = None,
                       max_seconds: float | None = None) -> Path:
     """Side and top views in a pad-aligned frame (pad on the +x axis)."""
     fig, (side, top) = plt.subplots(2, 1, figsize=(7, 6), sharex=True)
@@ -107,7 +133,7 @@ def main(argv=None):
     ap.add_argument("--params", type=Path, required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--stage", type=int, default=2)
-    ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--scale", type=float, default=None, help="optional check against the run's scale")
     ap.add_argument("--out", type=Path, help="GIF path")
     ap.add_argument("--topdown", type=Path, help="trajectory plot path")
     ap.add_argument("--n", type=int, default=20)

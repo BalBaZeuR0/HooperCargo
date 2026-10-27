@@ -25,3 +25,9 @@ def test_trajectory_plot(tmp_path, tiny_params):
     out = plot_trajectories(tiny_params, n=3, seed=0, out_png=tmp_path / "t.png", stage=0,
                             max_seconds=2.0)
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_render_still(tmp_path):
+    from render_flight import render_still
+    out = render_still(tmp_path / "s.png", width=320, height=180)
+    assert out.exists() and out.stat().st_size > 0

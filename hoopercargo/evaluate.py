@@ -24,10 +24,26 @@ COLUMNS = ("episode", "payload_mass", "payload_z", "payload_lateral", "com_shift
 FAIL_KEYS = ("fail_tilt", "fail_offpad", "fail_hard", "fail_timeout")
 
 
+def run_config(params_path: Path) -> dict:
+    return json.loads((Path(params_path).parent / "config.json").read_text())
+
+
+def make_eval_env(params_path: Path, stage: int, scale: float | None = None) -> HooperCargoEnv:
+    """Evaluation env matching the run: its scale, and payload observed only if it was in training.
+
+    Payloads are always random at evaluation, also for a fixed-payload baseline.
+    """
+    cfg = run_config(params_path)
+    if scale is not None and float(scale) != float(cfg["scale"]):
+        raise ValueError(f"scale {scale} does not match the run's scale {cfg['scale']}")
+    return HooperCargoEnv(stage=stage, scale=cfg["scale"], randomize_payload=True,
+                          observe_payload=cfg["randomize_payload"])
+
+
 def load_policy(params_path: Path):
     """Deterministic policy `obs -> action` from a params file and its run's config.json."""
     params_path = Path(params_path)
-    cfg = json.loads((params_path.parent / "config.json").read_text())["ppo"]
+    cfg = run_config(params_path)["ppo"]
     nets = ppo_networks.make_ppo_networks(
         OBS_SIZE, 3, preprocess_observations_fn=running_statistics.normalize,
         policy_hidden_layer_sizes=tuple(cfg["policy_hidden_layer_sizes"]),
@@ -56,9 +72,9 @@ def _rollout_fn(env: HooperCargoEnv, policy):
     return jax.jit(run)
 
 
-def evaluate(params_path, episodes: int, seed: int, stage: int, scale: float, out_csv,
+def evaluate(params_path, episodes: int, seed: int, stage: int, scale: float | None, out_csv,
              batch: int = 250) -> list[dict]:
-    env = HooperCargoEnv(stage=stage, scale=scale)
+    env = make_eval_env(params_path, stage, scale)
     p = env.params
     run = _rollout_fn(env, load_policy(params_path))
     keys = jax.random.split(jax.random.PRNGKey(seed), episodes)
@@ -114,7 +130,7 @@ def main(argv=None):
     ap.add_argument("--episodes", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--stage", type=int, default=2)
-    ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--scale", type=float, default=None, help="optional check against the run's scale")
     ap.add_argument("--out", type=Path, default=Path("results/eval.csv"))
     args = ap.parse_args(argv)
     rows = evaluate(args.params, args.episodes, args.seed, args.stage, args.scale, args.out)

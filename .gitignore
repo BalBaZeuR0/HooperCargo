@@ -7,3 +7,4 @@ runs/
 .rlpanel/
 *.pkl
 !results/*.csv
+MUJOCO_LOG.TXT

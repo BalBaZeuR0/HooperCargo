@@ -46,10 +46,13 @@ class CargoState:
 class HooperCargoEnv(base.Env):
     """Cargo hopper point-to-point flight with random payload, fuel burn and wind."""
 
-    def __init__(self, stage: int = 2, scale: float = 1.0, randomize_payload: bool = True):
+    def __init__(self, stage: int = 2, scale: float = 1.0, randomize_payload: bool = True,
+                 observe_payload: bool = True):
         self.params = HopperParams.for_scale(scale)
         self.stage = STAGES[stage].scaled(self.params)
-        self._randomize_payload = bool(randomize_payload)
+        self.randomize_payload = bool(randomize_payload)
+        # a policy trained on a fixed payload sees a constant mass input, also when evaluated
+        self.observe_payload = bool(observe_payload)
         self._host_model = build_model(scale)
         self._model = mjx.put_model(self._host_model)
         self._ids = body_ids(self._host_model)
@@ -90,7 +93,7 @@ class HooperCargoEnv(base.Env):
         dist = jax.random.uniform(k_pad_d, (), minval=st.dist_min, maxval=st.dist_max)
         ang = jax.random.uniform(k_pad_a, (), minval=0.0, maxval=2.0 * jp.pi)
         pad_xy = dist * jp.array([jp.cos(ang), jp.sin(ang)])
-        cargo = sample_cargo(k_cargo, p, st) if self._randomize_payload else self._fixed_cargo()
+        cargo = sample_cargo(k_cargo, p, st) if self.randomize_payload else self._fixed_cargo()
         fuel = jp.array(p.fuel_mass0)
 
         yaw = jax.random.uniform(k_yaw, (), minval=0.0, maxval=2.0 * jp.pi)
@@ -129,8 +132,8 @@ class HooperCargoEnv(base.Env):
         body_com = data.xipos[ids.hopper]
         torque = jp.cross(data.site_xpos[ids.thrust_site] - body_com, force)
 
-        drag = drag_force(data.qvel[0:3], wind_vel, p)
-        torque += jp.cross(data.subtree_com[ids.hopper] - body_com, drag)
+        drag, aero_torque = self.aero_wrench(data, wind_vel)
+        torque += aero_torque
         omega_world = data.xmat[ids.hopper] @ data.qvel[3:6]
         torque -= p.ang_damping * omega_world
 
@@ -223,6 +226,17 @@ class HooperCargoEnv(base.Env):
         return s, reward, done, {k: jp.asarray(v, jp.float32) for k, v in metrics.items()}
 
     # ------------------------------------------------------------------ helpers
+    def aero_wrench(self, data, wind_vel: jax.Array):
+        """Drag force and its torque about the hopper body CoM (`xipos`, where xfrc acts).
+
+        Drag acts at the centre of pressure (geometric centre of the hull), so wind
+        tilts the vehicle when the loaded CoM sits below it.
+        """
+        hop = self._ids.hopper
+        drag = drag_force(data.qvel[0:3], wind_vel, self.params)
+        cp = data.xpos[hop] + data.xmat[hop] @ jp.array([0.0, 0.0, self.params.cp_z])
+        return drag, jp.cross(cp - data.xipos[hop], drag)
+
     def foot_heights(self, data) -> jax.Array:
         return data.geom_xpos[self._foot_geoms, 2] - self.params.foot_radius
 
@@ -245,7 +259,7 @@ class HooperCargoEnv(base.Env):
             d.qvel[3:6],
             tvc / p.max_tvc_rad,
             (s.fuel / p.fuel_mass0)[None],
-            (s.cargo.mass / p.payload_mass_max)[None],
+            jp.where(self.observe_payload, s.cargo.mass / p.payload_mass_max, 0.5)[None],
             self.foot_contacts(d).astype(jp.float32),
             s.airborne.astype(jp.float32)[None],
             s.touched.astype(jp.float32)[None],

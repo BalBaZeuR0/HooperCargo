@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import time
 
+from brax.envs import wrappers as brax_wrappers
 from brax.io import model as brax_model
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as ppo
@@ -32,6 +33,7 @@ DEFAULT_PPO = dict(
     normalize_observations=True,
     num_evals=20,
     num_eval_envs=128,
+    deterministic_eval=True,
     policy_hidden_layer_sizes=(256, 256, 256),
     value_hidden_layer_sizes=(256, 256, 256),
 )
@@ -43,6 +45,44 @@ TINY_PPO = dict(
 )
 
 NETWORK_KEYS = ("policy_hidden_layer_sizes", "value_hidden_layer_sizes")
+
+
+class FreshAutoResetWrapper(brax_wrappers.training.Wrapper):
+    """Auto-reset that draws a new random scenario for every episode.
+
+    Brax's AutoResetWrapper restores the first reset state, so each training env
+    would replay one pad / cargo / wind (and gust sequence) forever.
+    """
+
+    def reset(self, rng: jax.Array):
+        state = self.env.reset(rng)
+        state.info["reset_rng"] = jax.vmap(lambda k: jax.random.fold_in(k, 1))(rng)
+        return state
+
+    def step(self, state, action):
+        if "steps" in state.info:
+            state.info.update(steps=jp.where(state.done, 0, state.info["steps"]))
+        state = state.replace(done=jp.zeros_like(state.done))
+        state = self.env.step(state, action)
+        keys = jax.vmap(jax.random.split)(state.info["reset_rng"])
+        fresh = self.env.reset(keys[:, 1])
+
+        def where_done(new, old):
+            done = state.done.reshape((-1,) + (1,) * (old.ndim - 1))
+            return jp.where(done, new, old)
+
+        pipeline_state = jax.tree.map(where_done, fresh.pipeline_state, state.pipeline_state)
+        obs = where_done(fresh.obs, state.obs)
+        state.info["reset_rng"] = keys[:, 0]
+        return state.replace(pipeline_state=pipeline_state, obs=obs)
+
+
+def wrap_fresh_reset(env, episode_length: int = 1000, action_repeat: int = 1,
+                     randomization_fn=None):
+    """Drop-in for `brax.envs.training.wrap` with fresh scenarios on auto-reset."""
+    env = brax_wrappers.training.EpisodeWrapper(env, episode_length, action_repeat)
+    env = brax_wrappers.training.VmapWrapper(env)
+    return FreshAutoResetWrapper(env)
 
 
 def ppo_config(scale: float, overrides: dict | None = None) -> dict:
@@ -83,7 +123,8 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
     out = None
     try:
         for stage, steps in zip(stages, steps_per_stage):
-            env = HooperCargoEnv(stage=stage, scale=scale, randomize_payload=randomize_payload)
+            env = HooperCargoEnv(stage=stage, scale=scale, randomize_payload=randomize_payload,
+                                 observe_payload=randomize_payload)
             t0 = time.time()
 
             def progress(step, metrics, stage=stage, offset=offset, t0=t0):
@@ -105,6 +146,7 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
             _, params, _ = ppo.train(
                 environment=env, num_timesteps=int(steps), num_envs=num_envs, seed=seed + stage,
                 network_factory=network_factory, progress_fn=progress,
+                wrap_env_fn=wrap_fresh_reset,
                 restore_params=params, restore_value_fn=True, **train_kwargs)
             out = run_dir / f"params_stage{stage}.pkl"
             brax_model.save_params(str(out), params)
