@@ -164,7 +164,7 @@ class HooperCargoEnv(base.Env):
                       last_action=action, step=s.step + 1)
         s, reward, done, metrics = self._landing(prev, s, throttle)
         return state.replace(pipeline_state=s, obs=self._observe(s), reward=reward,
-                             done=done.astype(jp.float32), metrics=metrics)
+                             done=done.astype(jp.float32), metrics={**state.metrics, **metrics})
 
     def _landing(self, prev: CargoState, s: CargoState, throttle: jax.Array):
         """Take-off / touchdown bookkeeping, termination, reward and metrics."""
