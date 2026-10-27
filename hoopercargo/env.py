@@ -16,6 +16,7 @@ from mujoco import mjx
 from .config import G0, STAGES, HopperParams
 from .model import body_ids, build_model
 from .payload import Cargo, apply_mass_props, sample_cargo
+from .reward import event_reward, guidance_velocity, step_reward
 from .wind import WindState, drag_force, sample_wind, step_gust
 
 OBS_SIZE = 31
@@ -158,10 +159,68 @@ class HooperCargoEnv(base.Env):
 
         (data, tvc_cmd, fuel), _ = jax.lax.scan(substep, (s.data, s.tvc_cmd, s.fuel), None,
                                                 length=p.frame_skip)
+        prev = s
         s = s.replace(data=data, tvc_cmd=tvc_cmd, fuel=fuel, wind=wind, rng=rng,
                       last_action=action, step=s.step + 1)
-        return state.replace(pipeline_state=s, obs=self._observe(s), reward=jp.array(0.0),
-                             done=jp.array(0.0))
+        s, reward, done, metrics = self._landing(prev, s, throttle)
+        return state.replace(pipeline_state=s, obs=self._observe(s), reward=reward,
+                             done=done.astype(jp.float32), metrics=metrics)
+
+    def _landing(self, prev: CargoState, s: CargoState, throttle: jax.Array):
+        """Take-off / touchdown bookkeeping, termination, reward and metrics."""
+        p, d = self.params, s.data
+        foot_h = self.foot_heights(d)
+        contacts = foot_h <= p.contact_tol
+        airborne = s.airborne | (jp.min(foot_h) > p.airborne_height)
+        first_touch = airborne & ~s.touched & jp.any(contacts)
+        # velocity entering the step: contact impulses have not damped it yet
+        v_prev = prev.data.qvel[0:3]
+        touch_vz = jp.where(first_touch, jp.abs(v_prev[2]), s.touch_vz)
+        touch_vxy = jp.where(first_touch, jp.linalg.norm(v_prev[0:2]), s.touch_vxy)
+        touched = s.touched | first_touch
+        settle_timer = jp.where(touched, s.settle_timer + p.dt, 0.0)
+
+        tilt = self.tilt(d)
+        com = d.subtree_com[self._ids.hopper]
+        feet_xy = d.geom_xpos[self._foot_geoms, 0:2]
+        feet_in_pad = jp.all(jp.linalg.norm(feet_xy - s.pad_xy, axis=1) <= p.pad_radius)
+        hard = (touch_vz >= p.touchdown_vz_max) | (touch_vxy >= p.touchdown_vxy_max)
+        settled = touched & (settle_timer >= p.settle_time - 1e-6)
+
+        tipped = tilt > p.tilt_fail_rad
+        out = ((jp.linalg.norm(com[0:2] - s.pad_xy) > self.stage.dist_max + 30.0 * p.scale)
+               | (com[2] > 60.0 * p.scale))
+        upright_ok = jp.all(contacts) & (tilt < p.tilt_success_rad)
+        success = settled & feet_in_pad & upright_ok & ~hard & ~tipped
+        fail_offpad = (settled & ~feet_in_pad) | (out & ~tipped)
+        fail_tilt = tipped | (settled & feet_in_pad & ~upright_ok)
+        fail_hard = settled & feet_in_pad & upright_ok & hard & ~tipped
+        terminal = success | fail_offpad | fail_tilt | fail_hard
+        fail_timeout = ~terminal & (s.step >= p.episode_steps)
+        done = terminal | fail_timeout
+
+        rel_xy = s.pad_xy - com[0:2]
+        v_des = guidance_velocity(rel_xy, jp.min(foot_h), p)
+        shaping = step_reward(d.qvel[0:3], v_des, tilt, throttle, s.last_action - prev.last_action, p)
+        reward = (jp.where(prev.touched, 0.0, shaping)
+                  + event_reward(success, done & ~success))
+
+        f = done.astype(jp.float32)
+        metrics = {
+            "success": f * success,
+            "fail_tilt": f * fail_tilt,
+            "fail_offpad": f * fail_offpad,
+            "fail_hard": f * fail_hard,
+            "fail_timeout": f * fail_timeout,
+            "landing_error": f * jp.linalg.norm(jp.mean(feet_xy, axis=0) - s.pad_xy),
+            "fuel_used": f * (1.0 - s.fuel / p.fuel_mass0),
+            "flight_time": f * s.step * p.dt,
+            "touch_vz": f * touch_vz,
+            "touch_vxy": f * touch_vxy,
+        }
+        s = s.replace(airborne=airborne, touched=touched, touch_vz=touch_vz, touch_vxy=touch_vxy,
+                      settle_timer=settle_timer)
+        return s, reward, done, {k: jp.asarray(v, jp.float32) for k, v in metrics.items()}
 
     # ------------------------------------------------------------------ helpers
     def foot_heights(self, data) -> jax.Array:
