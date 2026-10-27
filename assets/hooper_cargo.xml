@@ -7,7 +7,10 @@
         step by hoopercargo.payload.apply_mass_props,
       * mocap launch / landing pads (visual only),
       * only foot <-> ground contacts are enabled,
-      * larger ground, MJX-friendly solver profile,
+      * larger ground; Newton solver with 4 iterations (CG with 8, Haktan's
+        contact-free profile, diverges once the feet touch the ground),
+      * position actuators take radians (ctrlrange stays in degrees in the file
+        and is converted by the compiler),
       * hopper raised by one foot radius so the feet rest exactly on the ground.
 
     hoopercargo.model.build_model(scale) rescales this file; all numbers here
@@ -20,8 +23,8 @@
     <option gravity="0 0 -9.81"
             timestep="0.002"
             integrator="Euler"
-            solver="CG"
-            iterations="8"
+            solver="Newton"
+            iterations="4"
             ls_iterations="4"/>
 
     <visual>
