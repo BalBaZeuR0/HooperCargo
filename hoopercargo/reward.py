@@ -6,10 +6,12 @@ hovering nor prefer an early crash to a long flight.
 
 Progress toward the pad is rewarded per metre closed; it telescopes to the
 start-to-finish distance change, so it cannot be farmed either. A soft,
-upright landing just off the pad earns part of the fail penalty back, which
-gives the policy a gradient toward the pad before it ever finds a success.
-Without these two terms every failure costs the same, and the discounted
-agent learnt to stay airborne and drift away to postpone the penalty.
+upright landing off the pad is not a failure in reward terms: it earns a
+share of the success bonus that shrinks with the distance to the pad. Any
+touchdown the vehicle survives therefore beats crashing, timing out or
+leaving the area, and landing closer always pays more. With a flat penalty
+for every failure, the discounted agent learnt to never touch down and to
+drift away instead, postponing a penalty it could not avoid.
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ REWARD = dict(
     tilt_width=0.1,    # rad^2
     success=200.0,
     fail=-100.0,
-    near_miss=100.0,   # refund for a soft upright landing next to the pad
+    near_miss=200.0,   # soft upright landing off the pad, times closeness (< success)
 )
 
 
@@ -64,5 +66,5 @@ def progress_reward(dist_prev: jax.Array, dist: jax.Array, params: HopperParams)
 
 
 def near_miss_bonus(landing_error: jax.Array, params: HopperParams) -> jax.Array:
-    """Part of the fail penalty refunded for landing close to the pad."""
+    """Reward for a soft upright landing off the pad: the closer, the more."""
     return REWARD["near_miss"] * jp.exp(-(landing_error / (2.0 * params.pad_radius)) ** 2)

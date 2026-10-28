@@ -211,7 +211,7 @@ class HooperCargoEnv(base.Env):
         landing_error = jp.linalg.norm(jp.mean(feet_xy, axis=0) - s.pad_xy)
         soft_offpad = settled & ~feet_in_pad & upright_ok & ~hard & ~tipped
         reward = (jp.where(prev.touched, 0.0, shaping)
-                  + event_reward(success, done & ~success)
+                  + event_reward(success, done & ~success & ~soft_offpad)
                   + jp.where(soft_offpad, near_miss_bonus(landing_error, p), 0.0))
 
         f = done.astype(jp.float32)

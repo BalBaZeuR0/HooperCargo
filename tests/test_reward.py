@@ -51,8 +51,7 @@ def test_progress_rewards_closing_in_and_telescopes():
     assert REWARD["progress"] * 100.0 < REWARD["success"]
 
 
-def test_near_miss_refund_shrinks_with_distance_and_never_beats_success():
+def test_soft_offpad_landing_pays_less_than_success_but_more_than_failing():
     near = float(near_miss_bonus(jnp.array(1.6), P))
     far = float(near_miss_bonus(jnp.array(10.0), P))
-    assert near > far >= 0.0
-    assert REWARD["fail"] + REWARD["near_miss"] <= 0.0 < REWARD["success"]
+    assert REWARD["success"] > near > far >= 0.0 > REWARD["fail"]
