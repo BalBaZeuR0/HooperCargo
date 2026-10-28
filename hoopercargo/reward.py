@@ -1,8 +1,9 @@
 """Guidance velocity field and reward terms.
 
-The per-step shaping is small and positive; summed over a whole episode it
-stays below the success bonus, so the agent can neither farm reward by
-hovering nor prefer an early crash to a long flight.
+The per-step shaping is never positive: tracking the guidance velocity and
+staying upright only reduce a small per-step cost. A positive per-step term,
+however small, is worth more to a discounted agent than a landing many
+seconds away, and the policy learnt to hover until timeout to collect it.
 
 Progress toward the pad is rewarded per metre closed; it telescopes to the
 start-to-finish distance change, so it cannot be farmed either. A soft,
@@ -50,8 +51,8 @@ def guidance_velocity(rel_xy: jax.Array, height: jax.Array, params: HopperParams
 def step_reward(v: jax.Array, v_des: jax.Array, tilt: jax.Array, throttle: jax.Array,
                 d_action: jax.Array, params: HopperParams) -> jax.Array:
     err = (v - v_des) / jp.sqrt(params.scale)
-    return (REWARD["track"] * jp.exp(-jp.sum(err**2) / REWARD["track_width"])
-            + REWARD["upright"] * jp.exp(-tilt**2 / REWARD["tilt_width"])
+    return (-REWARD["track"] * (1.0 - jp.exp(-jp.sum(err**2) / REWARD["track_width"]))
+            - REWARD["upright"] * (1.0 - jp.exp(-tilt**2 / REWARD["tilt_width"]))
             - REWARD["throttle"] * throttle
             - REWARD["smooth"] * jp.sum(d_action**2))
 

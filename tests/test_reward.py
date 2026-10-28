@@ -29,10 +29,15 @@ def test_tracking_reward_higher_when_matching():
     assert good > bad and good > tilted
 
 
-def test_whole_flight_shaping_is_smaller_than_success_bonus():
+def test_step_shaping_is_never_positive_so_hovering_cannot_be_farmed():
     vd = jnp.zeros(3)
     best = step_reward(vd, vd, jnp.array(0.0), jnp.array(0.0), jnp.zeros(3), P)
-    assert float(best) * P.episode_steps < REWARD["success"]
+    assert float(best) == 0.0
+    assert float(step_reward(vd + 1.0, vd, jnp.array(0.3), jnp.array(0.6), jnp.ones(3), P)) < 0.0
+    # to the discounted agent, even the worst shaping stream costs far less than a crash
+    from hoopercargo.train import DEFAULT_PPO
+    worst = REWARD["track"] + REWARD["upright"] + REWARD["throttle"]
+    assert worst / (1.0 - DEFAULT_PPO["discounting"]) < -0.25 * REWARD["fail"]
 
 
 def test_event_rewards():
