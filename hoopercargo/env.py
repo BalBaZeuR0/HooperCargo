@@ -16,7 +16,7 @@ from mujoco import mjx
 from .config import G0, STAGES, HopperParams
 from .model import body_ids, build_model
 from .payload import Cargo, apply_mass_props, sample_cargo
-from .reward import event_reward, guidance_velocity, step_reward
+from .reward import event_reward, guidance_velocity, near_miss_bonus, progress_reward, step_reward
 from .wind import WindState, drag_force, sample_wind, step_gust
 
 OBS_SIZE = 31
@@ -205,8 +205,14 @@ class HooperCargoEnv(base.Env):
         rel_xy = s.pad_xy - com[0:2]
         v_des = guidance_velocity(rel_xy, jp.min(foot_h), p)
         shaping = step_reward(d.qvel[0:3], v_des, tilt, throttle, s.last_action - prev.last_action, p)
+        prev_com = prev.data.subtree_com[self._ids.hopper]
+        shaping += progress_reward(jp.linalg.norm(s.pad_xy - prev_com[0:2]),
+                                   jp.linalg.norm(rel_xy), p)
+        landing_error = jp.linalg.norm(jp.mean(feet_xy, axis=0) - s.pad_xy)
+        soft_offpad = settled & ~feet_in_pad & upright_ok & ~hard & ~tipped
         reward = (jp.where(prev.touched, 0.0, shaping)
-                  + event_reward(success, done & ~success))
+                  + event_reward(success, done & ~success)
+                  + jp.where(soft_offpad, near_miss_bonus(landing_error, p), 0.0))
 
         f = done.astype(jp.float32)
         metrics = {
@@ -215,7 +221,7 @@ class HooperCargoEnv(base.Env):
             "fail_offpad": f * fail_offpad,
             "fail_hard": f * fail_hard,
             "fail_timeout": f * fail_timeout,
-            "landing_error": f * jp.linalg.norm(jp.mean(feet_xy, axis=0) - s.pad_xy),
+            "landing_error": f * landing_error,
             "fuel_used": f * (1.0 - s.fuel / p.fuel_mass0),
             "flight_time": f * s.step * p.dt,
             "touch_vz": f * touch_vz,

@@ -140,7 +140,12 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
                 writer.writerow(row)
                 csv_file.flush()
                 last_success = row.get("eval/episode_success", last_success)
-                panel.log({**row, "stage": stage}, step=offset + int(step))
+                # rlpanel's summary tiles read these standard names
+                aliases = {"eval/mean_reward": "eval/episode_reward",
+                           "eval/success_rate": "eval/episode_success",
+                           "eval/mean_ep_length": "eval/avg_episode_length"}
+                extra = {a: row[k] for a, k in aliases.items() if k in row}
+                panel.log({**row, **extra, "stage": stage}, step=offset + int(step))
                 panel.progress(offset + int(step), total)
 
             _, params, _ = ppo.train(
