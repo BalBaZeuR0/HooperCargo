@@ -66,7 +66,7 @@ Bu repo fikrin teknik ayağını gösteriyor. Küçük ölçekli bir dikey kalk�
 | Eylem | Gaz (0–1) + iki TVC açısı (±20°) | Haktan'ın eylem uzayıyla aynı. Tek motor yuvarlanmayı (roll) kontrol edemez. İniş simetrik bacaklarla yapıldığı için bu sorun değil. |
 | Temas | Yalnız 4 ayak ile zemin arasındaki temas açık, diğer bütün geomlar kapalı. | Haktan temasın hepsini kapatmıştı. Bizde inişin kendisi görevin parçası, ayak temasları da ucuz. |
 | Motor kesme | İlk yere değmede (havalandıktan sonra) motor kesilir. Sonrası pasif: hopper ya ayakta kalır ya devrilir. | Gerçek iniş araçları da dokunuşta motoru keser; tekrar zıplayıp "hile" yapmayı önler. |
-| Bölüm sonu | Güvenli iniş + 2 s yerleşme, devrilme (eğim > 60°), yere gövdeyle çarpma, sınır dışı, ya da süre aşımı (40 s) | |
+| Bölüm sonu | Güvenli iniş + 2 s yerleşme, devrilme (eğim > 80°; 60° idi, try4 yan yatarak ilerleyen uçuşları kesiyordu), yere gövdeyle çarpma, sınır dışı, ya da süre aşımı (40 s) | |
 | PPO uygulaması | Brax'ın kendi PPO'su (`brax.training.agents.ppo`) | MJX ortamı saf JAX olduğu için en hızlısı bu. Haktan zaten Brax kullanıyor. |
 | rlpanel | Brax'ın `progress_fn`'i içinden `panel.log` / `panel.progress` çağrılır. Bağımlılık: `rlpanel @ git+https://github.com/BalBaZeuR0/RLpanel@v0.1.0` (sb3 eki yok). Testlerde `RLPANEL_DISABLE=1`. | |
 | Çalışma ortamı | Kod hem JAX-CPU'da (Windows'ta doğrudan; geliştirme ve testler için) hem JAX-GPU'da (eğitim) çalışacak şekilde yazılır. | JAX'in ekran kartı desteği yerel Windows'ta yok, GPU için WSL2 Ubuntu gerekiyor. Bilgisayarda şu an yalnız docker-desktop dağıtımı var. Bu karar eğitim günü verilecek. |

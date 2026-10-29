@@ -8,7 +8,7 @@ from hoopercargo.payload import Cargo
 from hoopercargo.train import TINY_PPO, ppo_config, train, wrap_fresh_reset
 
 KEY = jax.random.PRNGKey(0)
-MASS_OBS = 21   # rel_pad 3 + vel 3 + rot 9 + omega 3 + tvc 2 + fuel 1
+MASS_OBS = 15   # rel_pad 3 + vel 3 + up 3 + omega 3 + tvc 2 + fuel 1
 
 
 def test_unobserved_payload_gives_constant_mass_observation():

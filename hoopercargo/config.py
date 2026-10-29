@@ -51,7 +51,9 @@ class HopperParams:
     touchdown_vxy_max: float = 1.0
     settle_time: float = 2.0          # s
     tilt_success_rad: float = math.radians(15.0)
-    tilt_fail_rad: float = math.radians(60.0)
+    # in flight: beyond ~56 deg full thrust no longer holds altitude (T/W 1.8), but the
+    # vehicle can still recover; a 60 deg limit ended flights that banked to translate
+    tilt_fail_rad: float = math.radians(80.0)
     episode_seconds: float = 40.0
     # simulation
     timestep: float = 0.002

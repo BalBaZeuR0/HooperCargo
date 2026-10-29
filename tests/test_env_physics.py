@@ -41,8 +41,8 @@ def com_z(state, env=None):
 def test_reset_shapes_and_jit_vmap():
     env = HooperCargoEnv(stage=2)
     s = jax.jit(jax.vmap(env.reset))(jax.random.split(KEY, 8))
-    assert s.obs.shape == (8, 31)
-    assert env.observation_size == 31 and env.action_size == 3
+    assert s.obs.shape == (8, 25)
+    assert env.observation_size == 25 and env.action_size == 3
     s2 = jax.jit(jax.vmap(env.step))(s, jnp.zeros((8, 3)))
     assert jnp.isfinite(s2.obs).all()
 

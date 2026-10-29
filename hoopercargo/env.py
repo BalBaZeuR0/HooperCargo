@@ -19,7 +19,7 @@ from .payload import Cargo, apply_mass_props, sample_cargo
 from .reward import event_reward, guidance_velocity, near_miss_bonus, progress_reward, step_reward
 from .wind import WindState, drag_force, sample_wind, step_gust
 
-OBS_SIZE = 31
+OBS_SIZE = 25
 METRIC_KEYS = ("success", "fail_tilt", "fail_offpad", "fail_hard", "fail_timeout",
                "landing_error", "fuel_used", "flight_time", "touch_vz", "touch_vxy")
 
@@ -253,15 +253,21 @@ class HooperCargoEnv(base.Env):
         return jp.arccos(jp.clip(data.xmat[self._ids.hopper][2, 2], -1.0, 1.0))
 
     def _observe(self, s: CargoState) -> jax.Array:
+        """Egocentric: pad and velocity in the body frame, attitude as the world up axis.
+
+        The gimbal acts in the body frame and the heading is random, so world-frame
+        inputs left the policy to learn the rotation itself; it banked away from the pad.
+        """
         p, d = self.params, s.data
         L, sq = p.scale, jp.sqrt(p.scale)
         com = d.subtree_com[self._ids.hopper]
+        rot = d.xmat[self._ids.hopper]          # body -> world
         rel_pad = jp.array([s.pad_xy[0], s.pad_xy[1], 0.0]) - com
         tvc = jp.array([d.qpos[self._ids.yaw_qpos], d.qpos[self._ids.pitch_qpos]])
         return jp.concatenate([
-            rel_pad / (50.0 * L),
-            d.qvel[0:3] / (10.0 * sq),
-            d.xmat[self._ids.hopper].reshape(-1),
+            rot.T @ rel_pad / (50.0 * L),
+            rot.T @ d.qvel[0:3] / (10.0 * sq),
+            rot[2],                             # world up in the body frame
             d.qvel[3:6],
             tvc / p.max_tvc_rad,
             (s.fuel / p.fuel_mass0)[None],
