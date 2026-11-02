@@ -14,14 +14,16 @@ import jax.numpy as jp
 from mujoco import mjx
 
 from .config import G0, STAGES, HopperParams
+from .guide import pd_action
 from .model import body_ids, build_model
 from .payload import Cargo, apply_mass_props, sample_cargo
-from .reward import event_reward, guidance_velocity, near_miss_bonus, progress_reward, step_reward
+from .reward import (event_reward, guidance_velocity, lean_bonus, near_miss_bonus, progress_reward,
+                     step_reward, tilt_limit)
 from .wind import WindState, drag_force, sample_wind, step_gust
 
 OBS_SIZE = 25
 METRIC_KEYS = ("success", "fail_tilt", "fail_offpad", "fail_hard", "fail_timeout",
-               "landing_error", "fuel_used", "flight_time", "touch_vz", "touch_vxy")
+               "landing_error", "fuel_used", "flight_time", "touch_vz", "touch_vxy", "took_off")
 
 
 @struct.dataclass
@@ -40,6 +42,7 @@ class CargoState:
     touch_vxy: jax.Array
     settle_timer: jax.Array
     step: jax.Array
+    guide_left: jax.Array
     rng: jax.Array
 
 
@@ -47,8 +50,11 @@ class HooperCargoEnv(base.Env):
     """Cargo hopper point-to-point flight with random payload, fuel burn and wind."""
 
     def __init__(self, stage: int = 2, scale: float = 1.0, randomize_payload: bool = True,
-                 observe_payload: bool = True):
+                 observe_payload: bool = True, guide_steps: int = 0):
+        """`guide_steps` > 0: jump start. Each episode, the PD guide flies the first
+        U{0..guide_steps} steps and the policy takes over from there (training only)."""
         self.params = HopperParams.for_scale(scale)
+        self.guide_steps = int(guide_steps)
         self.stage = STAGES[stage].scaled(self.params)
         self.randomize_payload = bool(randomize_payload)
         # a policy trained on a fixed payload sees a constant mass input, also when evaluated
@@ -89,7 +95,7 @@ class HooperCargoEnv(base.Env):
 
     def reset(self, rng: jax.Array) -> base.State:
         p, st = self.params, self.stage
-        rng, k_pad_d, k_pad_a, k_cargo, k_wind, k_yaw = jax.random.split(rng, 6)
+        rng, k_pad_d, k_pad_a, k_cargo, k_wind, k_yaw, k_guide = jax.random.split(rng, 7)
         dist = jax.random.uniform(k_pad_d, (), minval=st.dist_min, maxval=st.dist_max)
         ang = jax.random.uniform(k_pad_a, (), minval=0.0, maxval=2.0 * jp.pi)
         pad_xy = dist * jp.array([jp.cos(ang), jp.sin(ang)])
@@ -112,7 +118,9 @@ class HooperCargoEnv(base.Env):
             pad_xy=pad_xy, tvc_cmd=jp.zeros(2), last_action=jp.zeros(3),
             airborne=jp.array(False), touched=jp.array(False),
             touch_vz=jp.array(0.0), touch_vxy=jp.array(0.0), settle_timer=jp.array(0.0),
-            step=jp.array(0, dtype=jp.int32), rng=rng,
+            step=jp.array(0, dtype=jp.int32),
+            guide_left=jax.random.randint(k_guide, (), 0, self.guide_steps + 1),
+            rng=rng,
         )
         metrics = {k: jp.array(0.0) for k in METRIC_KEYS}
         return base.State(pipeline_state=state, obs=self._observe(state), reward=jp.array(0.0),
@@ -146,6 +154,9 @@ class HooperCargoEnv(base.Env):
     def step(self, state: base.State, action: jax.Array) -> base.State:
         s: CargoState = state.pipeline_state
         p = self.params
+        model = self.model_for(s.cargo, s.fuel)
+        if self.guide_steps > 0:
+            action = jp.where(s.guide_left > 0, pd_action(self, s, model), action)
         action = jp.clip(action, -1.0, 1.0)
         throttle = (action[0] + 1.0) * 0.5
         tvc_target = action[1:3] * p.max_tvc_rad
@@ -153,7 +164,6 @@ class HooperCargoEnv(base.Env):
         rng, k_gust = jax.random.split(s.rng)
         gust = step_gust(k_gust, s.wind.gust, s.gust_sigma, p.dt)
         wind = s.wind.replace(gust=gust)
-        model = self.model_for(s.cargo, s.fuel)
 
         def substep(carry, x):
             return self._physics_substep(carry, x, model=model, throttle=throttle,
@@ -164,7 +174,8 @@ class HooperCargoEnv(base.Env):
                                                 length=p.frame_skip)
         prev = s
         s = s.replace(data=data, tvc_cmd=tvc_cmd, fuel=fuel, wind=wind, rng=rng,
-                      last_action=action, step=s.step + 1)
+                      last_action=action, step=s.step + 1,
+                      guide_left=jp.maximum(s.guide_left - 1, 0))
         s, reward, done, metrics = self._landing(prev, s, throttle)
         return state.replace(pipeline_state=s, obs=self._observe(s), reward=reward,
                              done=done.astype(jp.float32), metrics={**state.metrics, **metrics})
@@ -203,8 +214,16 @@ class HooperCargoEnv(base.Env):
         done = terminal | fail_timeout
 
         rel_xy = s.pad_xy - com[0:2]
-        v_des = guidance_velocity(rel_xy, jp.min(foot_h), p)
-        shaping = step_reward(d.qvel[0:3], v_des, tilt, throttle, s.last_action - prev.last_action, p)
+        dist = jp.linalg.norm(rel_xy)
+        height = jp.min(foot_h)
+        v = d.qvel[0:3]
+        to_pad = rel_xy / jp.maximum(dist, 1e-6)
+        z_b = d.xmat[self._ids.hopper][:, 2]
+        lean_toward = jp.arctan2(jp.dot(z_b[0:2], to_pad), z_b[2])
+        v_des = guidance_velocity(rel_xy, height, p)
+        shaping = step_reward(v, v_des, tilt, throttle, s.last_action - prev.last_action, p,
+                              limit=tilt_limit(dist, v[0:2], p))
+        shaping += lean_bonus(lean_toward, jp.dot(v[0:2], to_pad), dist, height, v[0:2], p)
         prev_com = prev.data.subtree_com[self._ids.hopper]
         shaping += progress_reward(jp.linalg.norm(s.pad_xy - prev_com[0:2]),
                                    jp.linalg.norm(rel_xy), p)
@@ -226,6 +245,7 @@ class HooperCargoEnv(base.Env):
             "flight_time": f * s.step * p.dt,
             "touch_vz": f * touch_vz,
             "touch_vxy": f * touch_vxy,
+            "took_off": f * airborne,
         }
         s = s.replace(airborne=airborne, touched=touched, touch_vz=touch_vz, touch_vxy=touch_vxy,
                       settle_timer=settle_timer)

@@ -66,7 +66,7 @@ Expected output:
 14 passed in 3.39s
 ```
 
-The full suite (`python -m pytest -q`, 55 tests) also trains and evaluates tiny policies and takes about 11 minutes on CPU.
+The full suite (`python -m pytest -q`) also trains and evaluates tiny policies and takes about 11 minutes on CPU.
 
 ## Usage
 
@@ -94,6 +94,8 @@ python scripts/make_plots.py --eval results/eval.csv --progress runs/main/progre
 python scripts/render_flight.py --params runs/main/params_stage2.pkl --seed 3 --out assets/demo.gif --topdown plots/trajectories.png
 ```
 
+Jump start: `--guide-schedule 800,400,0` splits each stage into equal chunks; in each chunk a hand-written cascaded PD controller (`hoopercargo/guide.py`) flies the first U{0..g} steps of every training episode before the policy takes over, so PPO sees successful landings from the start; the guide fades out over the chunks, and evaluation always runs the policy alone. The same PD controller is the classical baseline: untuned, it lands 97% / 52% / 22% of 64 flights on stages 0 / 1 / 2 (mostly off-pad under wind on the harder stages).
+
 Ablation: `--no-payload-randomization` trains with a fixed 0.4 kg cargo at the bay centre and no payload-mass input (evaluation then uses random payloads, still without that input; `evaluate` reads the mode and the scale from the run's `config.json`); `--scale 2.0` trains a hopper twice as large (Froude-scaled: mass ×8, thrust ×8, same thrust-to-weight).
 
 ## Reproducing the results
@@ -115,7 +117,8 @@ HooperCargo/
 │   ├── model.py        # builds the MuJoCo model at any scale
 │   ├── payload.py      # cargo sampling, payload/fuel mass properties
 │   ├── wind.py         # mean wind + OU gusts, drag force
-│   ├── reward.py       # guidance velocity field, reward terms
+│   ├── reward.py       # guidance velocity field (take-off gate), tilt bands, lean bonus, reward terms
+│   ├── guide.py        # cascaded PD controller: jump-start guide and classical baseline
 │   ├── env.py          # HooperCargoEnv (Brax/MJX environment)
 │   ├── train.py        # PPO + curriculum + rlpanel
 │   └── evaluate.py     # deterministic N-flight evaluation -> CSV

@@ -20,7 +20,7 @@ from .payload import Cargo, loaded_com
 
 COLUMNS = ("episode", "payload_mass", "payload_z", "payload_lateral", "com_shift", "wind_mean",
            "pad_distance", "success", "fail_reason", "landing_error", "fuel_used", "flight_time",
-           "touch_vz", "touch_vxy")
+           "touch_vz", "touch_vxy", "took_off")
 FAIL_KEYS = ("fail_tilt", "fail_offpad", "fail_hard", "fail_timeout")
 
 
@@ -103,6 +103,7 @@ def evaluate(params_path, episodes: int, seed: int, stage: int, scale: float | N
                 flight_time=m["flight_time"],
                 touch_vz=m["touch_vz"],
                 touch_vxy=m["touch_vxy"],
+                took_off=int(m["took_off"] > 0.5),
             ))
     out_csv = Path(out_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -119,7 +120,8 @@ def summarize(rows: list[dict]) -> str:
     reasons = {k: sum(r["fail_reason"] == k for r in rows) for k in ("tilt", "offpad", "hard", "timeout")}
     err = sum(r["landing_error"] for r in ok) / max(len(ok), 1)
     fuel = sum(r["fuel_used"] for r in ok) / max(len(ok), 1)
-    return (f"safe landings: {len(ok)}/{n} ({100 * len(ok) / n:.1f}%) | "
+    took_off = sum(r.get("took_off", 1) for r in rows)
+    return (f"safe landings: {len(ok)}/{n} ({100 * len(ok) / n:.1f}%) | took off: {took_off}/{n} | "
             f"landing error {err:.2f} m, fuel used {100 * fuel:.0f}% (successful flights) | "
             f"failures {reasons}")
 

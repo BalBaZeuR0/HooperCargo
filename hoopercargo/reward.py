@@ -13,13 +13,23 @@ touchdown the vehicle survives therefore beats crashing, timing out or
 leaving the area, and landing closer always pays more. With a flat penalty
 for every failure, the discounted agent learnt to never touch down and to
 drift away instead, postponing a penalty it could not avoid.
+
+Tilt (angle from the vertical) is free up to 45 deg in cruise; it costs a little
+from 45 to 50 deg, where heavy loads stop holding altitude (T/W 1.5), and more
+beyond. Near the pad the free limit narrows to the 15 deg landing limit. The one
+positive per-step term is a small lean bonus: leaning toward the pad, while
+already moving toward it and outside the braking distance, earns up to `lean`
+per step (saturating at 15 deg). It is zero when hovering, so it cannot be
+farmed, and a whole episode of it stays well below the success bonus.
 """
 from __future__ import annotations
+
+import math
 
 import jax
 import jax.numpy as jp
 
-from .config import HopperParams
+from .config import G0, HopperParams
 
 REWARD = dict(
     track=0.05,        # velocity tracking, per step
@@ -28,31 +38,75 @@ REWARD = dict(
     smooth=0.01,       # action changes, per step
     progress=1.0,      # per metre of horizontal distance closed toward the pad
     track_width=4.0,   # (m/s)^2
-    tilt_width=0.1,    # rad^2
     success=200.0,
     fail=-100.0,
     near_miss=200.0,   # soft upright landing off the pad, times closeness (< success)
+    lean=0.02,         # per step, leaning toward the pad in cruise (positive, capped)
 )
+
+TAKEOFF_HEIGHT = 2.0                      # m (x L): horizontal guidance opens up to here
+LEAN_TARGET = math.radians(15.0)          # lean bonus saturates here
+TILT_FREE = math.radians(45.0)            # cruise: no tilt cost below this
+TILT_WARN = math.radians(50.0)            # 45-50 deg: light warning cost
+TILT_PAD = math.radians(15.0)             # free limit over the pad (= landing limit)
+BRAKE_TILT = math.radians(15.0)           # tilt assumed for the braking distance
 
 
 def guidance_velocity(rel_xy: jax.Array, height: jax.Array, params: HopperParams) -> jax.Array:
-    """Desired velocity: fly at a cruise altitude toward the pad, then descend onto it."""
+    """Desired velocity: climb, fly at a cruise altitude toward the pad, then descend onto it.
+
+    Horizontal speed opens up linearly while climbing to `TAKEOFF_HEIGHT`, so the vehicle
+    is not asked to bank next to the ground; the cruise altitude stays 1 m above that.
+    """
     L, s = params.scale, jp.sqrt(params.scale)
+    h_min = TAKEOFF_HEIGHT * L
     d = jp.linalg.norm(rel_xy)
     direction = rel_xy / jp.maximum(d, 1e-6)
-    v_xy = direction * jp.minimum(8.0 * s, 0.5 * d)
-    h_des = jp.clip(0.3 * d, 0.0, 15.0 * L)
+    gate = jp.clip(height / h_min, 0.0, 1.0)
+    v_xy = direction * jp.minimum(8.0 * s, 0.5 * d) * gate
+    h_des = jp.clip(0.3 * d, h_min + 1.0 * L, 15.0 * L)
     climb = jp.clip(0.8 * (h_des - height), -2.0 * s, 3.0 * s)
     descend = -jp.clip(0.5 * height + 0.3 * s, 0.3 * s, 0.75 * params.touchdown_vz_max)
     v_z = jp.where(d > params.pad_radius, climb, descend)
     return jp.array([v_xy[0], v_xy[1], v_z])
 
 
+def braking_distance(v_xy: jax.Array, params: HopperParams) -> jax.Array:
+    """Horizontal distance to stop from |v_xy| at a 15 deg lean, plus the pad radius."""
+    return jp.sum(v_xy**2) / (2.0 * G0 * math.tan(BRAKE_TILT)) + params.pad_radius
+
+
+def tilt_limit(d: jax.Array, v_xy: jax.Array, params: HopperParams) -> jax.Array:
+    """Free tilt: 45 deg in cruise, narrowing to 15 deg over the pad inside the braking distance."""
+    far = jp.clip((d - params.pad_radius) / jp.maximum(braking_distance(v_xy, params), 1e-6),
+                  0.0, 1.0)
+    return TILT_PAD + (TILT_FREE - TILT_PAD) * far
+
+
+def tilt_cost(tilt: jax.Array, limit: jax.Array) -> jax.Array:
+    """0 below `limit`; a light ramp over the next 5 deg; growing beyond (1 per 30 deg)."""
+    warn = jp.clip((tilt - limit) / (TILT_WARN - TILT_FREE), 0.0, 1.0)
+    over = jp.maximum(tilt - limit - (TILT_WARN - TILT_FREE), 0.0) / math.radians(30.0)
+    return 0.25 * warn + over
+
+
+def lean_bonus(lean_toward: jax.Array, v_toward: jax.Array, d: jax.Array, height: jax.Array,
+               v_xy: jax.Array, params: HopperParams) -> jax.Array:
+    """Small reward for leaning toward the pad in cruise; zero unless moving toward it."""
+    s = jp.sqrt(params.scale)
+    cruising = (height >= TAKEOFF_HEIGHT * params.scale) & (d > braking_distance(v_xy, params))
+    lean = jp.clip(lean_toward / LEAN_TARGET, 0.0, 1.0)
+    moving = jp.clip(v_toward / (2.0 * s), 0.0, 1.0)
+    return jp.where(cruising, REWARD["lean"] * lean * moving, 0.0)
+
+
 def step_reward(v: jax.Array, v_des: jax.Array, tilt: jax.Array, throttle: jax.Array,
-                d_action: jax.Array, params: HopperParams) -> jax.Array:
+                d_action: jax.Array, params: HopperParams,
+                limit: jax.Array | float = TILT_PAD) -> jax.Array:
+    """Per-step cost (never positive). `limit` is the free tilt from `tilt_limit`."""
     err = (v - v_des) / jp.sqrt(params.scale)
     return (-REWARD["track"] * (1.0 - jp.exp(-jp.sum(err**2) / REWARD["track_width"]))
-            - REWARD["upright"] * (1.0 - jp.exp(-tilt**2 / REWARD["tilt_width"]))
+            - REWARD["upright"] * tilt_cost(tilt, limit)
             - REWARD["throttle"] * throttle
             - REWARD["smooth"] * jp.sum(d_action**2))
 

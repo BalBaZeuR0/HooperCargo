@@ -1,6 +1,11 @@
 """PPO training of the cargo hopper with a staged curriculum and live rlpanel logging.
 
     python -m hoopercargo.train --run-dir runs/main --steps-per-stage 50e6,100e6,150e6
+
+Jump start (`--guide-schedule 1000,600,300,0`): each stage is split into equal
+chunks; in chunk i the PD guide flies the first U{0..g_i} steps of every training
+episode, so PPO sees landings from the start; the guide fades out over the chunks.
+Evaluation always runs the policy alone.
 """
 from __future__ import annotations
 
@@ -98,14 +103,17 @@ def make_networks_factory(cfg: dict):
 
 
 def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, scale: float,
-          stages: list[int], randomize_payload: bool, ppo_overrides: dict | None = None) -> Path:
+          stages: list[int], randomize_payload: bool, ppo_overrides: dict | None = None,
+          guide_schedule: list[int] | None = None) -> Path:
     from rlpanel import Panel
 
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     cfg = ppo_config(scale, ppo_overrides)
+    guide_schedule = list(guide_schedule or [0])
     config = dict(steps_per_stage=list(steps_per_stage), num_envs=num_envs, seed=seed, scale=scale,
                   stages=list(stages), randomize_payload=randomize_payload,
+                  guide_schedule=guide_schedule,
                   ppo={k: list(v) if isinstance(v, tuple) else v for k, v in cfg.items()})
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
 
@@ -122,19 +130,23 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
     last_success = float("nan")
     out = None
     try:
-        for stage, steps in zip(stages, steps_per_stage):
-            env = HooperCargoEnv(stage=stage, scale=scale, randomize_payload=randomize_payload,
-                                 observe_payload=randomize_payload)
+        chunks = [(stage, steps // len(guide_schedule), g)
+                  for stage, steps in zip(stages, steps_per_stage) for g in guide_schedule]
+        for i, (stage, steps, guide) in enumerate(chunks):
+            env_kw = dict(stage=stage, scale=scale, randomize_payload=randomize_payload,
+                          observe_payload=randomize_payload)
+            env = HooperCargoEnv(guide_steps=guide, **env_kw)
+            eval_env = HooperCargoEnv(**env_kw)
             t0 = time.time()
 
-            def progress(step, metrics, stage=stage, offset=offset, t0=t0):
+            def progress(step, metrics, stage=stage, offset=offset, t0=t0, guide=guide):
                 nonlocal writer, last_success
                 row = {k: float(v) for k, v in metrics.items() if jp.ndim(v) == 0}
-                row.update(global_step=offset + int(step), stage=stage,
+                row.update(global_step=offset + int(step), stage=stage, guide=guide,
                            wall_seconds=time.time() - t0)
+                fixed = ("global_step", "stage", "guide", "wall_seconds")
                 if writer is None:
-                    fields = ["global_step", "stage", "wall_seconds"] + sorted(
-                        k for k in row if k not in ("global_step", "stage", "wall_seconds"))
+                    fields = list(fixed) + sorted(k for k in row if k not in fixed)
                     writer = csv.DictWriter(csv_file, fieldnames=fields, extrasaction="ignore")
                     writer.writeheader()
                 writer.writerow(row)
@@ -149,8 +161,8 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
                 panel.progress(offset + int(step), total)
 
             _, params, _ = ppo.train(
-                environment=env, num_timesteps=int(steps), num_envs=num_envs, seed=seed + stage,
-                network_factory=network_factory, progress_fn=progress,
+                environment=env, eval_env=eval_env, num_timesteps=int(steps), num_envs=num_envs,
+                seed=seed + 100 * stage + i, network_factory=network_factory, progress_fn=progress,
                 wrap_env_fn=wrap_fresh_reset,
                 restore_params=params, restore_value_fn=True, **train_kwargs)
             out = run_dir / f"params_stage{stage}.pkl"
@@ -188,6 +200,8 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--no-payload-randomization", action="store_true")
+    ap.add_argument("--guide-schedule", default="0",
+                    help="max PD-guided steps per chunk, e.g. 1000,600,300,0 (0 = no jump start)")
     ap.add_argument("--benchmark", action="store_true", help="measure env-steps/s and exit")
     args = ap.parse_args(argv)
     if args.benchmark:
@@ -197,8 +211,9 @@ def main(argv=None):
     stages = [int(x) for x in args.stages.split(",")]
     if len(steps) != len(stages):
         ap.error("--steps-per-stage and --stages need the same number of entries")
+    guide = [int(float(x)) for x in args.guide_schedule.split(",")]
     out = train(args.run_dir, steps, args.num_envs, args.seed, args.scale, stages,
-                not args.no_payload_randomization)
+                not args.no_payload_randomization, guide_schedule=guide)
     print(f"saved {out}")
 
 

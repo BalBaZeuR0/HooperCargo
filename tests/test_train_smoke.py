@@ -18,3 +18,14 @@ def test_tiny_training_writes_params(tmp_path):
     # global step keeps increasing across stages
     steps = [int(float(r["global_step"])) for r in rows]
     assert steps == sorted(steps)
+
+
+def test_tiny_jump_start_training_logs_each_guide_chunk(tmp_path):
+    out = train(tmp_path, steps_per_stage=[4096], num_envs=8, seed=0, scale=1.0, stages=[0],
+                randomize_payload=True, ppo_overrides=TINY_PPO, guide_schedule=[40, 0])
+    assert out.exists()
+    cfg = json.loads((tmp_path / "config.json").read_text())
+    assert cfg["guide_schedule"] == [40, 0]
+    rows = list(csv.DictReader(open(tmp_path / "progress.csv")))
+    assert {r["guide"] for r in rows} == {"40", "0"}
+    assert "eval/episode_took_off" in rows[0]
