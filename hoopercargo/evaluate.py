@@ -37,7 +37,8 @@ def make_eval_env(params_path: Path, stage: int, scale: float | None = None) -> 
     if scale is not None and float(scale) != float(cfg["scale"]):
         raise ValueError(f"scale {scale} does not match the run's scale {cfg['scale']}")
     return HooperCargoEnv(stage=stage, scale=cfg["scale"], randomize_payload=True,
-                          observe_payload=cfg["randomize_payload"])
+                          observe_payload=cfg["randomize_payload"],
+                          residual=cfg.get("residual", 0.0))
 
 
 def load_policy(params_path: Path):

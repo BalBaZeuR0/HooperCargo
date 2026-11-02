@@ -38,3 +38,14 @@ def test_guide_takes_off_and_reports_it(guided):
     s = s.replace(pipeline_state=s.pipeline_state.replace(guide_left=jnp.array(10_000)))
     s = jax.lax.fori_loop(0, 150, lambda i, st: step(st, jnp.zeros(3)), s)
     assert bool(s.pipeline_state.airborne)
+
+
+def test_residual_policy_adds_a_bounded_correction_to_pd():
+    env = HooperCargoEnv(stage=0, residual=0.3)
+    s = jax.jit(env.reset)(jax.random.PRNGKey(2))
+    step = jax.jit(env.step)
+    zero = step(s, jnp.zeros(3)).pipeline_state.last_action      # pure PD
+    push = step(s, jnp.array([1.0, -1.0, 5.0])).pipeline_state.last_action
+    expected = jnp.clip(zero + 0.3 * jnp.array([1.0, -1.0, 1.0]), -1.0, 1.0)
+    assert float(zero[0]) > -1.0                                  # PD throttles up
+    assert jnp.allclose(push, expected, atol=1e-5)

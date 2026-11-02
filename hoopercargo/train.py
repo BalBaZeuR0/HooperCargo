@@ -6,6 +6,9 @@ Jump start (`--guide-schedule 1000,600,300,0`): each stage is split into equal
 chunks; in chunk i the PD guide flies the first U{0..g_i} steps of every training
 episode, so PPO sees landings from the start; the guide fades out over the chunks.
 Evaluation always runs the policy alone.
+
+Residual policy (`--residual 0.3`): the PD controller always flies and PPO learns
+only a bounded correction on top of it, in training and in evaluation.
 """
 from __future__ import annotations
 
@@ -104,7 +107,7 @@ def make_networks_factory(cfg: dict):
 
 def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, scale: float,
           stages: list[int], randomize_payload: bool, ppo_overrides: dict | None = None,
-          guide_schedule: list[int] | None = None) -> Path:
+          guide_schedule: list[int] | None = None, residual: float = 0.0) -> Path:
     from rlpanel import Panel
 
     run_dir = Path(run_dir)
@@ -113,7 +116,7 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
     guide_schedule = list(guide_schedule or [0])
     config = dict(steps_per_stage=list(steps_per_stage), num_envs=num_envs, seed=seed, scale=scale,
                   stages=list(stages), randomize_payload=randomize_payload,
-                  guide_schedule=guide_schedule,
+                  guide_schedule=guide_schedule, residual=float(residual),
                   ppo={k: list(v) if isinstance(v, tuple) else v for k, v in cfg.items()})
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
 
@@ -135,7 +138,7 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
                   for stage, steps in zip(stages, steps_per_stage) for g in guide_schedule]
         for i, (stage, steps, guide) in enumerate(chunks):
             env_kw = dict(stage=stage, scale=scale, randomize_payload=randomize_payload,
-                          observe_payload=randomize_payload)
+                          observe_payload=randomize_payload, residual=residual)
             env = HooperCargoEnv(guide_steps=guide, **env_kw)
             eval_env = HooperCargoEnv(**env_kw)
             t0 = time.time()
@@ -206,6 +209,8 @@ def main(argv=None):
     ap.add_argument("--no-payload-randomization", action="store_true")
     ap.add_argument("--guide-schedule", default="0",
                     help="max PD-guided steps per chunk, e.g. 1000,600,300,0 (0 = no jump start)")
+    ap.add_argument("--residual", type=float, default=0.0,
+                    help="residual policy: action = PD + residual * policy (0 = policy flies alone)")
     ap.add_argument("--benchmark", action="store_true", help="measure env-steps/s and exit")
     args = ap.parse_args(argv)
     if args.benchmark:
@@ -217,7 +222,8 @@ def main(argv=None):
         ap.error("--steps-per-stage and --stages need the same number of entries")
     guide = [int(float(x)) for x in args.guide_schedule.split(",")]
     out = train(args.run_dir, steps, args.num_envs, args.seed, args.scale, stages,
-                not args.no_payload_randomization, guide_schedule=guide)
+                not args.no_payload_randomization, guide_schedule=guide,
+                residual=args.residual)
     print(f"saved {out}")
 
 

@@ -50,11 +50,15 @@ class HooperCargoEnv(base.Env):
     """Cargo hopper point-to-point flight with random payload, fuel burn and wind."""
 
     def __init__(self, stage: int = 2, scale: float = 1.0, randomize_payload: bool = True,
-                 observe_payload: bool = True, guide_steps: int = 0):
+                 observe_payload: bool = True, guide_steps: int = 0, residual: float = 0.0):
         """`guide_steps` > 0: jump start. Each episode, the PD guide flies the first
-        U{0..guide_steps} steps and the policy takes over from there (training only)."""
+        U{0..guide_steps} steps and the policy takes over from there (training only).
+
+        `residual` > 0: residual policy. The PD controller always flies and the policy
+        only adds a correction, action = pd + residual * policy (training and evaluation)."""
         self.params = HopperParams.for_scale(scale)
         self.guide_steps = int(guide_steps)
+        self.residual = float(residual)
         self.stage = STAGES[stage].scaled(self.params)
         self.randomize_payload = bool(randomize_payload)
         # a policy trained on a fixed payload sees a constant mass input, also when evaluated
@@ -155,7 +159,9 @@ class HooperCargoEnv(base.Env):
         s: CargoState = state.pipeline_state
         p = self.params
         model = self.model_for(s.cargo, s.fuel)
-        if self.guide_steps > 0:
+        if self.residual > 0:
+            action = pd_action(self, s, model) + self.residual * jp.clip(action, -1.0, 1.0)
+        elif self.guide_steps > 0:
             action = jp.where(s.guide_left > 0, pd_action(self, s, model), action)
         action = jp.clip(action, -1.0, 1.0)
         throttle = (action[0] + 1.0) * 0.5

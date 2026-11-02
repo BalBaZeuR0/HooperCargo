@@ -96,6 +96,8 @@ python scripts/render_flight.py --params runs/main/params_stage2.pkl --seed 3 --
 
 Jump start: `--guide-schedule 800,400,0` splits each stage into equal chunks; in each chunk a hand-written cascaded PD controller (`hoopercargo/guide.py`) flies the first U{0..g} steps of every training episode before the policy takes over, so PPO sees successful landings from the start; the guide fades out over the chunks, and evaluation always runs the policy alone. The same PD controller is the classical baseline: untuned, it lands 97% / 52% / 22% of 64 flights on stages 0 / 1 / 2 (mostly off-pad under wind on the harder stages).
 
+Residual policy: `--residual 0.3` keeps the PD controller flying in training and evaluation and lets PPO learn only a bounded correction, action = PD + 0.3 × policy (Johannink et al., 2019). Pure PPO with jump start learned to take off and to land softly but never on the pad (try6, try7: 0% success); with the residual, the untrained policy's noise still leaves 95% / 62% / 30% success on stages 0 / 1 / 2, so PPO starts from the PD's level and has to beat it under wind and payload offsets.
+
 Ablation: `--no-payload-randomization` trains with a fixed 0.4 kg cargo at the bay centre and no payload-mass input (evaluation then uses random payloads, still without that input; `evaluate` reads the mode and the scale from the run's `config.json`); `--scale 2.0` trains a hopper twice as large (Froude-scaled: mass ×8, thrust ×8, same thrust-to-weight).
 
 ## Reproducing the results
