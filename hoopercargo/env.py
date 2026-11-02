@@ -210,7 +210,8 @@ class HooperCargoEnv(base.Env):
         fail_tilt = tipped | (settled & feet_in_pad & ~upright_ok)
         fail_hard = settled & feet_in_pad & upright_ok & hard & ~tipped
         terminal = success | fail_offpad | fail_tilt | fail_hard
-        fail_timeout = ~terminal & (s.step >= p.episode_steps)
+        no_takeoff = ~airborne & (s.step * p.dt >= p.takeoff_deadline - 1e-6)
+        fail_timeout = ~terminal & ((s.step >= p.episode_steps) | no_takeoff)
         done = terminal | fail_timeout
 
         rel_xy = s.pad_xy - com[0:2]

@@ -55,6 +55,9 @@ class HopperParams:
     # vehicle can still recover; a 60 deg limit ended flights that banked to translate
     tilt_fail_rad: float = math.radians(80.0)
     episode_seconds: float = 40.0
+    # not airborne by then -> failure: a 40 s timeout is invisible to a ~4 s discount
+    # horizon, so sitting on the launch pad was the cheapest policy
+    takeoff_deadline: float = 3.0     # s
     # simulation
     timestep: float = 0.002
     frame_skip: int = 10
@@ -102,6 +105,7 @@ class HopperParams:
             touchdown_vxy_max=b.touchdown_vxy_max * s,
             settle_time=b.settle_time * s,
             episode_seconds=b.episode_seconds * s,
+            takeoff_deadline=b.takeoff_deadline * s,
         )
 
 

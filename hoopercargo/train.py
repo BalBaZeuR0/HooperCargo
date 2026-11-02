@@ -128,6 +128,7 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
     params = None
     offset = 0
     last_success = float("nan")
+    last_step = 0
     out = None
     try:
         chunks = [(stage, steps // len(guide_schedule), g)
@@ -140,7 +141,8 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
             t0 = time.time()
 
             def progress(step, metrics, stage=stage, offset=offset, t0=t0, guide=guide):
-                nonlocal writer, last_success
+                nonlocal writer, last_success, last_step
+                last_step = int(step)
                 row = {k: float(v) for k, v in metrics.items() if jp.ndim(v) == 0}
                 row.update(global_step=offset + int(step), stage=stage, guide=guide,
                            wall_seconds=time.time() - t0)
@@ -167,7 +169,9 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
                 restore_params=params, restore_value_fn=True, **train_kwargs)
             out = run_dir / f"params_stage{stage}.pkl"
             brax_model.save_params(str(out), params)
-            offset += int(steps)
+            # Brax rounds the step budget up to whole batches: continue from what it ran
+            offset += max(int(steps), last_step)
+            last_step = 0
         panel.result({"final_eval_success": last_success})
     finally:
         csv_file.close()

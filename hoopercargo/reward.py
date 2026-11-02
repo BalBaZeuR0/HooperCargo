@@ -14,9 +14,11 @@ leaving the area, and landing closer always pays more. With a flat penalty
 for every failure, the discounted agent learnt to never touch down and to
 drift away instead, postponing a penalty it could not avoid.
 
-Tilt (angle from the vertical) is free up to 45 deg in cruise; it costs a little
-from 45 to 50 deg, where heavy loads stop holding altitude (T/W 1.5), and more
-beyond. Near the pad the free limit narrows to the 15 deg landing limit. The one
+Tilt (angle from the vertical) is free up to 20 deg in cruise, enough for 8 m/s
+into a 6 m/s headwind; it costs a little from 20 to 30 deg and more beyond. With
+45 deg free (try6) the only attitude signal left was the 80 deg crash, too late
+for a ~4 s discount horizon, and the policy tipped over. Near the pad the free
+limit narrows to the 15 deg landing limit. The one
 positive per-step term is a small lean bonus: leaning toward the pad, while
 already moving toward it and outside the braking distance, earns up to `lean`
 per step (saturating at 15 deg). It is zero when hovering, so it cannot be
@@ -33,7 +35,7 @@ from .config import G0, HopperParams
 
 REWARD = dict(
     track=0.05,        # velocity tracking, per step
-    upright=0.025,     # staying upright, per step
+    upright=0.05,      # tilt beyond the free limit, per step
     throttle=0.01,     # fuel use, per step
     smooth=0.01,       # action changes, per step
     progress=1.0,      # per metre of horizontal distance closed toward the pad
@@ -46,8 +48,8 @@ REWARD = dict(
 
 TAKEOFF_HEIGHT = 2.0                      # m (x L): horizontal guidance opens up to here
 LEAN_TARGET = math.radians(15.0)          # lean bonus saturates here
-TILT_FREE = math.radians(45.0)            # cruise: no tilt cost below this
-TILT_WARN = math.radians(50.0)            # 45-50 deg: light warning cost
+TILT_FREE = math.radians(20.0)            # cruise: no tilt cost below this
+TILT_WARN = math.radians(30.0)            # 20-30 deg: light warning cost
 TILT_PAD = math.radians(15.0)             # free limit over the pad (= landing limit)
 BRAKE_TILT = math.radians(15.0)           # tilt assumed for the braking distance
 
@@ -77,14 +79,14 @@ def braking_distance(v_xy: jax.Array, params: HopperParams) -> jax.Array:
 
 
 def tilt_limit(d: jax.Array, v_xy: jax.Array, params: HopperParams) -> jax.Array:
-    """Free tilt: 45 deg in cruise, narrowing to 15 deg over the pad inside the braking distance."""
+    """Free tilt: 20 deg in cruise, narrowing to 15 deg over the pad inside the braking distance."""
     far = jp.clip((d - params.pad_radius) / jp.maximum(braking_distance(v_xy, params), 1e-6),
                   0.0, 1.0)
     return TILT_PAD + (TILT_FREE - TILT_PAD) * far
 
 
 def tilt_cost(tilt: jax.Array, limit: jax.Array) -> jax.Array:
-    """0 below `limit`; a light ramp over the next 5 deg; growing beyond (1 per 30 deg)."""
+    """0 below `limit`; a light ramp over the next 10 deg; growing beyond (1 per 30 deg)."""
     warn = jp.clip((tilt - limit) / (TILT_WARN - TILT_FREE), 0.0, 1.0)
     over = jp.maximum(tilt - limit - (TILT_WARN - TILT_FREE), 0.0) / math.radians(30.0)
     return 0.25 * warn + over

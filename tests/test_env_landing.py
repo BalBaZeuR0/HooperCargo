@@ -88,10 +88,10 @@ def test_launch_contact_is_not_touchdown(env, step):
     assert not bool(s.pipeline_state.touched) and not bool(s.pipeline_state.airborne)
 
 
-def test_never_taking_off_times_out(env, step):
+def test_never_taking_off_fails_at_the_takeoff_deadline(env, step):
     s = run_until_done(env, step, jax.jit(env.reset)(KEY), IDLE)
-    assert m(s, "fail_timeout") == 1.0 and m(s, "success") == 0.0
-    assert int(s.pipeline_state.step) == env.params.episode_steps
+    assert m(s, "fail_timeout") == 1.0 and m(s, "success") == 0.0 and m(s, "took_off") == 0.0
+    assert int(s.pipeline_state.step) == round(env.params.takeoff_deadline / env.dt)
 
 
 def test_engine_cut_after_touchdown(env, step):

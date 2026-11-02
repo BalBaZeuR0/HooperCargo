@@ -29,7 +29,7 @@ def test_tracking_reward_higher_when_matching():
     good = step_reward(vd, vd, jnp.array(0.0), jnp.array(0.5), jnp.zeros(3), P)
     bad = step_reward(vd + 2.0, vd, jnp.array(0.0), jnp.array(0.5), jnp.zeros(3), P)
     tilted = step_reward(vd, vd, jnp.array(1.0), jnp.array(0.5), jnp.zeros(3), P,
-                         limit=math.radians(45.0))
+                         limit=math.radians(20.0))
     assert good > bad and good > tilted
 
 
@@ -77,22 +77,22 @@ def test_takeoff_gate_climbs_first_then_opens_horizontal_speed():
     assert float(short[2]) > 0
 
 
-def test_tilt_bands_free_to_45_light_to_50_then_growing():
-    lim = math.radians(45.0)
+def test_tilt_bands_free_to_20_light_to_30_then_growing():
+    lim = math.radians(20.0)
     c = lambda deg: float(tilt_cost(jnp.array(math.radians(deg)), lim))
-    assert c(0) == 0.0 and c(30) == 0.0 and c(45) == 0.0
-    assert 0.0 < c(47) < c(50) <= 0.25 + 1e-6
-    assert c(65) > c(50) and c(80) > c(65)
+    assert c(0) == 0.0 and c(15) == 0.0 and c(20) == 0.0
+    assert 0.0 < c(25) < c(30) <= 0.25 + 1e-6
+    assert c(45) > c(30) and c(80) > c(45)
 
 
 def test_tilt_limit_narrows_to_15_deg_over_the_pad():
     v = jnp.array([6.0, 0.0])
     far = float(tilt_limit(jnp.array(80.0), v, P))
     over = float(tilt_limit(jnp.array(0.5), v, P))
-    assert abs(far - math.radians(45.0)) < 1e-6
+    assert abs(far - math.radians(20.0)) < 1e-6
     assert abs(over - math.radians(15.0)) < 1e-6
     mid = float(tilt_limit(P.pad_radius + 0.5 * braking_distance(v, P), v, P))
-    assert math.radians(15.0) < mid < math.radians(45.0)
+    assert math.radians(15.0) < mid < math.radians(20.0)
 
 
 def test_lean_bonus_only_when_leaning_and_moving_toward_pad_in_cruise():
