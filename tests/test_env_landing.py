@@ -103,3 +103,18 @@ def test_metrics_only_on_final_step(env, step):
     s = step(drop(env, 0.1), jnp.asarray(IDLE))
     assert not bool(s.done)
     assert all(float(v) == 0.0 for v in s.metrics.values())
+
+
+def test_tipping_over_pays_for_the_steps_it_skips(env, step):
+    from hoopercargo.reward import REWARD
+    s = run_until_done(env, step, drop(env, 0.1, tilt_deg=50.0), IDLE)
+    left = env.params.episode_steps - int(s.pipeline_state.step)
+    assert left > 1000
+    assert float(s.reward) <= REWARD["fail"] - REWARD["early_end"] * left + 1.0
+
+
+def test_settled_failed_landing_is_not_charged_for_skipped_steps(env, step):
+    from hoopercargo.reward import REWARD
+    s = run_until_done(env, step, drop(env, 1.5, vz=-4.0), IDLE)       # hard but upright
+    assert m(s, "fail_hard") == 1.0
+    assert float(s.reward) > REWARD["fail"] - 1.0

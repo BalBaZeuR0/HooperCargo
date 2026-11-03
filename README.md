@@ -100,6 +100,8 @@ Residual policy: `--residual 0.3` keeps the PD controller flying in training and
 
 Warm-up hop: `--stages H,0,1,2` adds a stage before stage 0 with the pad 2.5–6 m away, no wind and a light payload, so a whole flight is short and the landing bonus lies inside the discount horizon (logged as stage -1).
 
+Crashing early is charged for the steps it skips (0.05 per step left, on top of the -100 failure). Every failure pays the same -100 and the shaping is a cost, so at `--discount 0.999` the cheapest failure was the quickest: pure PPO (try10b) tipped itself over 0.4 s after lift-off in every episode. Touchdowns that settle without tipping over are exempt, so attempting a landing never costs more than hovering to the timeout.
+
 Ablation: `--no-payload-randomization` trains with a fixed 0.4 kg cargo at the bay centre and no payload-mass input (evaluation then uses random payloads, still without that input; `evaluate` reads the mode and the scale from the run's `config.json`); `--scale 2.0` trains a hopper twice as large (Froude-scaled: mass ×8, thrust ×8, same thrust-to-weight).
 
 ## Reproducing the results

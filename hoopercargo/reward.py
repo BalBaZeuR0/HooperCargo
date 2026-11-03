@@ -45,6 +45,7 @@ REWARD = dict(
     near_miss=200.0,   # soft upright landing off the pad, times closeness (< success)
     lean=0.02,         # per step, leaning toward the pad in cruise (positive, capped)
     correction=0.02,   # residual policy: per step, times the mean squared correction
+    early_end=0.05,    # per step left in the episode, when it ends by tipping over/leaving/not lifting
 )
 
 TAKEOFF_HEIGHT = 2.0                      # m (x L): horizontal guidance opens up to here
@@ -116,6 +117,19 @@ def step_reward(v: jax.Array, v_des: jax.Array, tilt: jax.Array, throttle: jax.A
 
 def event_reward(success: jax.Array, fail: jax.Array) -> jax.Array:
     return jp.where(success, REWARD["success"], jp.where(fail, REWARD["fail"], 0.0))
+
+
+def early_end_penalty(early: jax.Array, steps_left: jax.Array) -> jax.Array:
+    """Charge the steps an episode skips by ending in a crash.
+
+    Every failure pays the same `fail`, and the per-step shaping is a cost, so with
+    a long horizon (discount 0.999) the cheapest failure is the quickest: try10b
+    tipped itself over 0.4 s after lift-off, every episode. Charging each skipped
+    step at about the per-step cost of flying makes no crash cheaper than flying on.
+    Touchdowns that settle without tipping over are exempt, so trying to land never
+    costs more than hovering to the timeout.
+    """
+    return jp.where(early, -REWARD["early_end"] * steps_left, 0.0)
 
 
 def progress_reward(dist_prev: jax.Array, dist: jax.Array, params: HopperParams) -> jax.Array:

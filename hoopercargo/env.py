@@ -17,7 +17,7 @@ from .config import G0, HopperParams, stage_config
 from .guide import pd_action
 from .model import body_ids, build_model
 from .payload import Cargo, apply_mass_props, sample_cargo
-from .reward import (REWARD, event_reward, guidance_velocity, lean_bonus, near_miss_bonus, progress_reward,
+from .reward import (REWARD, early_end_penalty, event_reward, guidance_velocity, lean_bonus, near_miss_bonus, progress_reward,
                      step_reward, tilt_limit)
 from .wind import WindState, drag_force, sample_wind, step_gust
 
@@ -246,7 +246,9 @@ class HooperCargoEnv(base.Env):
         soft_offpad = settled & ~feet_in_pad & upright_ok & ~hard & ~tipped
         reward = (jp.where(prev.touched, 0.0, shaping)
                   + event_reward(success, done & ~success & ~soft_offpad)
-                  + jp.where(soft_offpad, near_miss_bonus(landing_error, p), 0.0))
+                  + jp.where(soft_offpad, near_miss_bonus(landing_error, p), 0.0)
+                  + early_end_penalty(done & ~success & ~(settled & ~tipped),
+                                      jp.maximum(p.episode_steps - s.step, 0)))
 
         f = done.astype(jp.float32)
         metrics = {
