@@ -44,6 +44,7 @@ REWARD = dict(
     fail=-100.0,
     near_miss=200.0,   # soft upright landing off the pad, times closeness (< success)
     lean=0.02,         # per step, leaning toward the pad in cruise (positive, capped)
+    correction=0.02,   # residual policy: per step, times the mean squared correction
 )
 
 TAKEOFF_HEIGHT = 2.0                      # m (x L): horizontal guidance opens up to here

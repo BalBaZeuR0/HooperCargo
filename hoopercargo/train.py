@@ -211,6 +211,9 @@ def main(argv=None):
                     help="max PD-guided steps per chunk, e.g. 1000,600,300,0 (0 = no jump start)")
     ap.add_argument("--residual", type=float, default=0.0,
                     help="residual policy: action = PD + residual * policy (0 = policy flies alone)")
+    ap.add_argument("--discount", type=float, default=None,
+                    help="PPO discount (default 0.995); 0.999 sees a landing ~20 s ahead")
+    ap.add_argument("--learning-rate", type=float, default=None, help="PPO learning rate (default 3e-4)")
     ap.add_argument("--benchmark", action="store_true", help="measure env-steps/s and exit")
     args = ap.parse_args(argv)
     if args.benchmark:
@@ -221,9 +224,11 @@ def main(argv=None):
     if len(steps) != len(stages):
         ap.error("--steps-per-stage and --stages need the same number of entries")
     guide = [int(float(x)) for x in args.guide_schedule.split(",")]
+    overrides = {k: v for k, v in (("discounting", args.discount),
+                                   ("learning_rate", args.learning_rate)) if v is not None}
     out = train(args.run_dir, steps, args.num_envs, args.seed, args.scale, stages,
                 not args.no_payload_randomization, guide_schedule=guide,
-                residual=args.residual)
+                residual=args.residual, ppo_overrides=overrides)
     print(f"saved {out}")
 
 

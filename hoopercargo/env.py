@@ -17,7 +17,7 @@ from .config import G0, STAGES, HopperParams
 from .guide import pd_action
 from .model import body_ids, build_model
 from .payload import Cargo, apply_mass_props, sample_cargo
-from .reward import (event_reward, guidance_velocity, lean_bonus, near_miss_bonus, progress_reward,
+from .reward import (REWARD, event_reward, guidance_velocity, lean_bonus, near_miss_bonus, progress_reward,
                      step_reward, tilt_limit)
 from .wind import WindState, drag_force, sample_wind, step_gust
 
@@ -55,7 +55,10 @@ class HooperCargoEnv(base.Env):
         U{0..guide_steps} steps and the policy takes over from there (training only).
 
         `residual` > 0: residual policy. The PD controller always flies and the policy
-        only adds a correction, action = pd + residual * policy (training and evaluation)."""
+        only adds a correction, action = pd + residual * policy (training and evaluation).
+        The correction costs REWARD["correction"] x its mean square per step, so with no
+        reason to deviate the policy falls back to the PD (try8 without it: PPO's first
+        updates broke the PD's 97% landings into hovering)."""
         self.params = HopperParams.for_scale(scale)
         self.guide_steps = int(guide_steps)
         self.residual = float(residual)
@@ -159,8 +162,11 @@ class HooperCargoEnv(base.Env):
         s: CargoState = state.pipeline_state
         p = self.params
         model = self.model_for(s.cargo, s.fuel)
+        correction = jp.zeros(())
         if self.residual > 0:
-            action = pd_action(self, s, model) + self.residual * jp.clip(action, -1.0, 1.0)
+            raw = jp.clip(action, -1.0, 1.0)
+            correction = jp.mean(raw ** 2)
+            action = pd_action(self, s, model) + self.residual * raw
         elif self.guide_steps > 0:
             action = jp.where(s.guide_left > 0, pd_action(self, s, model), action)
         action = jp.clip(action, -1.0, 1.0)
@@ -182,11 +188,12 @@ class HooperCargoEnv(base.Env):
         s = s.replace(data=data, tvc_cmd=tvc_cmd, fuel=fuel, wind=wind, rng=rng,
                       last_action=action, step=s.step + 1,
                       guide_left=jp.maximum(s.guide_left - 1, 0))
-        s, reward, done, metrics = self._landing(prev, s, throttle)
+        s, reward, done, metrics = self._landing(prev, s, throttle, correction)
         return state.replace(pipeline_state=s, obs=self._observe(s), reward=reward,
                              done=done.astype(jp.float32), metrics={**state.metrics, **metrics})
 
-    def _landing(self, prev: CargoState, s: CargoState, throttle: jax.Array):
+    def _landing(self, prev: CargoState, s: CargoState, throttle: jax.Array,
+                 correction: jax.Array = 0.0):
         """Take-off / touchdown bookkeeping, termination, reward and metrics."""
         p, d = self.params, s.data
         foot_h = self.foot_heights(d)
@@ -231,6 +238,7 @@ class HooperCargoEnv(base.Env):
         shaping = step_reward(v, v_des, tilt, throttle, s.last_action - prev.last_action, p,
                               limit=tilt_limit(dist, v[0:2], p))
         shaping += lean_bonus(lean_toward, jp.dot(v[0:2], to_pad), dist, height, v[0:2], p)
+        shaping -= REWARD["correction"] * correction
         prev_com = prev.data.subtree_com[self._ids.hopper]
         shaping += progress_reward(jp.linalg.norm(s.pad_xy - prev_com[0:2]),
                                    jp.linalg.norm(rel_xy), p)

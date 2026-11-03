@@ -49,3 +49,18 @@ def test_residual_policy_adds_a_bounded_correction_to_pd():
     expected = jnp.clip(zero + 0.3 * jnp.array([1.0, -1.0, 1.0]), -1.0, 1.0)
     assert float(zero[0]) > -1.0                                  # PD throttles up
     assert jnp.allclose(push, expected, atol=1e-5)
+
+
+def test_residual_correction_costs_reward_in_flight():
+    from hoopercargo.reward import REWARD
+    env = HooperCargoEnv(stage=0, residual=0.3)
+    s = jax.jit(env.reset)(jax.random.PRNGKey(4))
+    step = jax.jit(env.step)
+    prev = jax.lax.fori_loop(0, 100, lambda i, st: step(st, jnp.zeros(3)), s)   # airborne, PD only
+    nxt = step(prev, jnp.zeros(3))
+    landing = jax.jit(env._landing)
+    ps, ns = prev.pipeline_state, nxt.pipeline_state
+    _, r_free, _, _ = landing(ps, ns, jnp.array(0.5), jnp.array(0.0))
+    _, r_full, _, _ = landing(ps, ns, jnp.array(0.5), jnp.array(1.0))
+    assert not bool(ns.touched)
+    assert float(r_free - r_full) == pytest.approx(REWARD["correction"], abs=1e-6)
