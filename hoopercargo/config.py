@@ -135,3 +135,28 @@ STAGES: tuple[StageConfig, ...] = (
     StageConfig(dist_min=20.0, dist_max=60.0, payload_max=0.8, wind_max=2.0, gust_sigma=0.5),
     StageConfig(dist_min=20.0, dist_max=100.0, payload_max=0.8, wind_max=6.0, gust_sigma=1.5),
 )
+
+# Warm-up "hop" before stage 0 (`--stages H,0,...`): the pad is a few metres away, so a
+# whole flight takes seconds and the landing bonus lies inside the discount horizon.
+# Stored as stage -1 in logs; never index STAGES with it (STAGES[-1] is stage 2).
+HOP = -1
+HOP_STAGE = StageConfig(dist_min=2.5, dist_max=6.0, payload_max=0.3, wind_max=0.0, gust_sigma=0.0)
+
+
+def stage_config(stage: int) -> StageConfig:
+    """Stage 0..2 of the curriculum, or the warm-up hop for `HOP` (-1)."""
+    if stage == HOP:
+        return HOP_STAGE
+    if not 0 <= stage < len(STAGES):
+        raise ValueError(f"unknown stage {stage}")
+    return STAGES[stage]
+
+
+def parse_stage(text: str) -> int:
+    """CLI stage name: 'H' (warm-up hop) or 0, 1, 2."""
+    text = text.strip()
+    return HOP if text.upper() == "H" else int(text)
+
+
+def stage_name(stage: int) -> str:
+    return "H" if stage == HOP else str(stage)

@@ -3,8 +3,9 @@
 Outer loop: position/velocity error -> desired acceleration (hold a cruise
 height while travelling, descend slowly once over the pad). Inner loop: the
 thrust direction that gives that acceleration -> body attitude error -> gimbal
-angles. Untuned; it lands about a quarter of stage-0 flights, which is enough
-for PPO to see successful landings from the start of training.
+angles. Untuned and without an integral term (it settles ~0.6 m off the pad
+centre); over 64 flights it lands 97% (hop) / 91% / 53% / 22% on stages H / 0 / 1 / 2,
+mostly missing the pad under wind.
 """
 from __future__ import annotations
 
@@ -25,7 +26,9 @@ def pd_action(env, s, model) -> jax.Array:
     v = d.qvel[0:3]
     rot = d.xmat[ids.hopper]
     e_xy = s.pad_xy - com[0:2]
-    over = (jp.linalg.norm(e_xy) < 0.4 * L) & (jp.linalg.norm(v[0:2]) < 0.4 * sq)
+    # descend once well inside the pad; without an integral term the PD settles ~0.6 m off
+    # centre, so a tighter (0.4 m) gate never opened and every flight waited for `late`
+    over = (jp.linalg.norm(e_xy) < 0.5 * p.pad_radius) & (jp.linalg.norm(v[0:2]) < 0.4 * sq)
     h = com[2] - p.rest_height
     # same take-off gate as the guidance field: climb first, then lean toward the pad
     gate = jp.clip(h / (TAKEOFF_HEIGHT * L), 0.0, 1.0)

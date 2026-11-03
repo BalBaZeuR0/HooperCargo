@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import functools
 import json
 from pathlib import Path
@@ -23,10 +24,11 @@ from brax.envs import wrappers as brax_wrappers
 from brax.io import model as brax_model
 from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as ppo
+import flax
 import jax
 import jax.numpy as jp
 
-from .config import HopperParams
+from .config import HopperParams, parse_stage, stage_name
 from .env import HooperCargoEnv
 
 DEFAULT_PPO = dict(
@@ -99,10 +101,36 @@ def ppo_config(scale: float, overrides: dict | None = None) -> dict:
     return cfg
 
 
-def make_networks_factory(cfg: dict):
-    return functools.partial(ppo_networks.make_ppo_networks,
+def make_networks_factory(cfg: dict, zero_mean_init: bool = False):
+    """Brax PPO networks; `zero_mean_init` starts the policy mean at exactly 0.
+
+    For the residual policy, a randomly initialised network adds a systematic,
+    state-dependent correction (several degrees of gimbal) from the first evaluation,
+    which pushed the PD off the pad (try9a: 97% -> 0% in one iteration). Zeroing the
+    mean columns of the last layer (Silver et al. 2018) starts training at pure PD;
+    the std columns stay random, so exploration is unchanged.
+    """
+    base = functools.partial(ppo_networks.make_ppo_networks,
                              policy_hidden_layer_sizes=tuple(cfg["policy_hidden_layer_sizes"]),
                              value_hidden_layer_sizes=tuple(cfg["value_hidden_layer_sizes"]))
+    if not zero_mean_init:
+        return base
+
+    def factory(observation_size, action_size, **kw):
+        nets = base(observation_size, action_size, **kw)
+        policy = nets.policy_network
+        last = f"hidden_{len(cfg['policy_hidden_layer_sizes'])}"
+
+        def init(key):
+            params = flax.core.unfreeze(policy.init(key))
+            layer = params["params"][last]
+            layer["kernel"] = layer["kernel"].at[:, :action_size].set(0.0)
+            layer["bias"] = layer["bias"].at[:action_size].set(0.0)
+            return params
+
+        return nets.replace(policy_network=dataclasses.replace(policy, init=init))
+
+    return factory
 
 
 def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, scale: float,
@@ -124,7 +152,7 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
     panel = Panel(project="HooperCargo", run=f"{run_dir.name}/seed_{seed}", seed=seed,
                   config=config, total_steps=total)
     train_kwargs = {k: v for k, v in cfg.items() if k not in NETWORK_KEYS}
-    network_factory = make_networks_factory(cfg)
+    network_factory = make_networks_factory(cfg, zero_mean_init=residual > 0)
 
     csv_file = open(run_dir / "progress.csv", "w", newline="")
     writer = None
@@ -170,7 +198,7 @@ def train(run_dir: Path, steps_per_stage: list[int], num_envs: int, seed: int, s
                 seed=seed + 100 * stage + i, network_factory=network_factory, progress_fn=progress,
                 wrap_env_fn=wrap_fresh_reset,
                 restore_params=params, restore_value_fn=True, **train_kwargs)
-            out = run_dir / f"params_stage{stage}.pkl"
+            out = run_dir / f"params_stage{stage_name(stage)}.pkl"
             brax_model.save_params(str(out), params)
             # Brax rounds the step budget up to whole batches: continue from what it ran
             offset += max(int(steps), last_step)
@@ -202,7 +230,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run-dir", type=Path, default=Path("runs/main"))
     ap.add_argument("--steps-per-stage", default="50e6,100e6,150e6")
-    ap.add_argument("--stages", default="0,1,2")
+    ap.add_argument("--stages", default="0,1,2",
+                    help="curriculum stages, e.g. H,0,1,2 (H = warm-up hop, logged as stage -1)")
     ap.add_argument("--num-envs", type=int, default=1024)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--scale", type=float, default=1.0)
@@ -220,7 +249,7 @@ def main(argv=None):
         benchmark(args.num_envs, 100, args.scale)
         return
     steps = [int(float(x)) for x in args.steps_per_stage.split(",")]
-    stages = [int(x) for x in args.stages.split(",")]
+    stages = [parse_stage(x) for x in args.stages.split(",")]
     if len(steps) != len(stages):
         ap.error("--steps-per-stage and --stages need the same number of entries")
     guide = [int(float(x)) for x in args.guide_schedule.split(",")]

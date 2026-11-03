@@ -15,6 +15,7 @@ from brax.training.agents.ppo import networks as ppo_networks
 import jax
 import jax.numpy as jp
 
+from .config import parse_stage
 from .env import OBS_SIZE, HooperCargoEnv
 from .payload import Cargo, loaded_com
 
@@ -132,7 +133,7 @@ def main(argv=None):
     ap.add_argument("--params", type=Path, required=True)
     ap.add_argument("--episodes", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=12345)
-    ap.add_argument("--stage", type=int, default=2)
+    ap.add_argument("--stage", type=parse_stage, default=2, help="0, 1, 2 or H (warm-up hop)")
     ap.add_argument("--scale", type=float, default=None, help="optional check against the run's scale")
     ap.add_argument("--out", type=Path, default=Path("results/eval.csv"))
     args = ap.parse_args(argv)

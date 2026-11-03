@@ -64,3 +64,19 @@ def test_residual_correction_costs_reward_in_flight():
     _, r_full, _, _ = landing(ps, ns, jnp.array(0.5), jnp.array(1.0))
     assert not bool(ns.touched)
     assert float(r_free - r_full) == pytest.approx(REWARD["correction"], abs=1e-6)
+
+
+def test_residual_policy_starts_at_pure_pd():
+    from brax.training.agents.ppo import networks as ppo_networks
+    from hoopercargo.train import TINY_PPO, make_networks_factory, ppo_config
+    cfg = ppo_config(1.0, TINY_PPO)
+    nets = make_networks_factory(cfg, zero_mean_init=True)(11, 3)
+    params = nets.policy_network.init(jax.random.PRNGKey(0))
+    obs = jax.random.normal(jax.random.PRNGKey(1), (5, 11)) * 10.0
+    out = nets.policy_network.apply(None, params, obs)
+    assert out.shape == (5, 6)
+    assert jnp.allclose(out[:, :3], 0.0)                 # mean = 0 -> correction 0 -> PD
+    assert float(jnp.abs(out[:, 3:]).sum()) > 0.0       # std head still random
+    act = ppo_networks.make_inference_fn(nets)((None, params), deterministic=True)
+    a, _ = act(obs[0], jax.random.PRNGKey(2))
+    assert jnp.allclose(a, 0.0)

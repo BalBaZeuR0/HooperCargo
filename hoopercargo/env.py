@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jp
 from mujoco import mjx
 
-from .config import G0, STAGES, HopperParams
+from .config import G0, HopperParams, stage_config
 from .guide import pd_action
 from .model import body_ids, build_model
 from .payload import Cargo, apply_mass_props, sample_cargo
@@ -62,7 +62,7 @@ class HooperCargoEnv(base.Env):
         self.params = HopperParams.for_scale(scale)
         self.guide_steps = int(guide_steps)
         self.residual = float(residual)
-        self.stage = STAGES[stage].scaled(self.params)
+        self.stage = stage_config(stage).scaled(self.params)
         self.randomize_payload = bool(randomize_payload)
         # a policy trained on a fixed payload sees a constant mass input, also when evaluated
         self.observe_payload = bool(observe_payload)
